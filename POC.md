@@ -4,11 +4,42 @@
 
 This document tracks the implementation status of the 5 critical POCs outlined in [design/07-poc-plan.md](../design/07-poc-plan.md).
 
-## POC 1: DeciderService Isolation ⚠️  IN PROGRESS
+## Important Discovery: Conductor Object Model Architecture
+
+### Investigation Results (commit cd528e126, Jan 31, 2022)
+
+**Conductor v3.5.0+ uses TWO parallel class hierarchies:**
+
+**Client DTOs** (API/Transport layer):
+- `com.netflix.conductor.common.run.Workflow`
+- `com.netflix.conductor.common.metadata.tasks.Task`
+- Used for REST API requests/responses
+- Used by external clients
+
+**Domain Models** (Core/Business layer):
+- `com.netflix.conductor.model.WorkflowModel`
+- `com.netflix.conductor.model.TaskModel`
+- Used internally by core services
+- **Used by DAO interfaces** ← Critical for POC
+
+**Conversion**:
+- `WorkflowModel.toWorkflow()` - domain to DTO
+- `TaskModel.toTask()` - domain to DTO
+- `ExecutionDAOFacade` handles boundary conversions
+
+**Version Timeline:**
+- Introduced: v3.5.0 (March 2022)
+- Present in all versions since then
+- Maven Central latest: 3.21.16
+- Local repo: v3.21.23 (Jan 2025)
+
+This is **not a version issue** - it's an architectural pattern we must follow.
+
+## POC 1: DeciderService Isolation 🟡 IN PROGRESS
 
 **Goal**: Prove `DeciderService` can be instantiated outside Spring context with minimal HashMap DAOs.
 
-**Status**: Foundation implemented, DeciderService instantiation pending
+**Status**: Core implementation complete, compilation issues remain
 
 ### What's Implemented
 
@@ -16,57 +47,57 @@ This document tracks the implementation status of the 5 critical POCs outlined i
 - Implements `MetadataDAO` interface
 - HashMap-based storage for `WorkflowDef` and `TaskDef`
 - Helper methods for test workflow registration
+- Correct return types (void for workflow, TaskDef for tasks)
 - No Spring dependencies
 
 ✅ **InMemoryExecutionDAO** (`src/main/java/io/temporal/conductor/poc/InMemoryExecutionDAO.java`)
 - Implements `ExecutionDAO` and `PollDataDAO` interfaces
-- HashMap-based storage for `Workflow` and `Task` instances
+- **UPDATED**: Uses domain models (`WorkflowModel`/`TaskModel`)
+- HashMap-based storage for workflow and task execution state
 - Tracks workflow-to-tasks relationships
 - Minimal implementations for unsupported operations
 - No Spring dependencies
 
+✅ **DeciderService Dependencies** (all created)
+- `MinimalIDGenerator` - extends IDGenerator (UUID-based)
+- `MinimalParametersUtils` - extends ParametersUtils (pass-through)
+- `MinimalExternalPayloadStorageUtils` - extends ExternalPayloadStorageUtils
+- `NoOpExternalPayloadStorage` - no-op implementation
+- `MinimalSystemTaskRegistry` - empty registry for POC
+
 ✅ **Test Harness** (`src/test/java/io/temporal/conductor/poc/DeciderServicePOCTest.java`)
-- JUnit test setup
-- DAO validation tests (passing)
-- Sequential workflow test structure (DeciderService instantiation pending)
+- JUnit test setup with all dependencies
+- **UPDATED**: Uses `WorkflowModel`/`TaskModel`
+- DAO validation tests (structure ready)
+- DeciderService instantiation code complete
+- Sequential workflow test structure ready
 
-### Next Steps
+### Remaining Work
 
-1. **Identify DeciderService Dependencies**
-   ```bash
-   cd conductor
-   # Find DeciderService constructor
-   find . -name "DeciderService.java" -exec grep -A 20 "public DeciderService" {} \;
-   ```
+1. **Complete DAO Interface Implementation**
+   - Add missing ExecutionDAO methods:
+     - `removeWorkflowWithExpiry(String, int)`
+     - Several deprecated methods that may still be required
+   - Audit full ExecutionDAO interface against 3.21.16
+   - Audit full MetadataDAO interface against 3.21.16
 
-2. **Create Minimal Implementations**
-   - `ParametersUtils` - expression evaluation
-   - `MetadataMapperService` - model mapping
-   - `SystemTaskRegistry` - system task handling
-   - `ExternalPayloadStorageUtils` - payload handling
-   - `IDGenerator` - ID generation
+2. **Fix Compilation Errors**
+   - Resolve remaining @Override mismatches
+   - Ensure all abstract methods are implemented
+   - Test with `./gradlew test --tests="*DeciderServicePOCTest"`
 
-3. **Wire Up DeciderService**
-   ```java
-   DeciderService deciderService = new DeciderService(
-       executionDAO,
-       metadataDAO,
-       parametersUtils,
-       metadataMapper,
-       systemTaskRegistry,
-       externalPayloadStorage,
-       idGenerator,
-       conductorProperties
-   );
-   ```
-
-4. **Run Test Workflow**
+3. **Run Test Workflow**
+   - Execute DAO validation tests
    - Call `deciderService.decide(workflow)`
    - Verify tasks are scheduled in correct order
    - Mark tasks complete and verify workflow progression
 
 ### Success Criteria
 
+- [x] DeciderService dependencies identified and created
+- [x] Uses correct domain models (WorkflowModel/TaskModel)
+- [ ] Code compiles without errors
+- [ ] DAO validation tests pass
 - [ ] DeciderService instantiates without Spring context
 - [ ] `decide()` returns `DeciderOutcome` with correct first task
 - [ ] After marking task complete, `decide()` returns next task
