@@ -1,0 +1,94 @@
+subprojects {
+    if (name == 'temporal-bom') {
+        return
+    }
+    apply plugin: 'java-library'
+
+    java {
+        // graal only supports java 8, 11, 16, 17, 21, 23
+        sourceCompatibility = project.hasProperty("edgeDepsTest") || project.hasProperty("nativeBuild") ? JavaVersion.VERSION_21 : JavaVersion.VERSION_1_8
+        targetCompatibility = project.hasProperty("edgeDepsTest") || project.hasProperty("nativeBuild") ? JavaVersion.VERSION_21 : JavaVersion.VERSION_1_8
+        withJavadocJar()
+        withSourcesJar()
+    }
+
+    compileJava {
+        options.encoding = 'UTF-8'
+        options.compilerArgs << '-Xlint:none' << '-Xlint:deprecation' << '-Werror' << '-parameters'
+        if (JavaVersion.current().isJava9Compatible() && !project.hasProperty("edgeDepsTest") && !project.hasProperty("nativeBuild")) {
+            // https://stackoverflow.com/a/43103115/525203
+            options.compilerArgs.addAll(['--release', '8'])
+        }
+    }
+
+    compileTestJava {
+        options.encoding = 'UTF-8'
+        options.compilerArgs << '-Xlint:none' << '-Xlint:deprecation' << '-Werror' << '-parameters'
+        if (JavaVersion.current().isJava9Compatible() && !project.hasProperty("edgeDepsTest") && !project.hasProperty("nativeBuild")) {
+            // https://stackoverflow.com/a/43103115/525203
+            options.compilerArgs.addAll(['--release', '8'])
+        }
+    }
+
+    javadoc {
+        options.encoding = 'UTF-8'
+        if (JavaVersion.current().isJava8Compatible()) {
+            options.addStringOption('Xdoclint:none', '-quiet')
+        }
+        if (JavaVersion.current().isJava9Compatible()) {
+            options.addBooleanOption('html5', true)
+        }
+        if (JavaVersion.current().isCompatibleWith(JavaVersion.VERSION_1_9) &&
+                !JavaVersion.current().isCompatibleWith(JavaVersion.VERSION_13)) {
+            //https://stackoverflow.com/questions/53732632/gradle-javadoc-search-redirects-to-undefined-url
+            //the flag is removed in java13: https://bugs.openjdk.java.net/browse/JDK-8215582
+            options.addBooleanOption('-no-module-directories', true)
+        }
+    }
+
+    // add a collection to track failedTests
+    ext.failedTests = []
+
+    test {
+        testLogging {
+            events 'passed', 'skipped', 'failed'
+            exceptionFormat 'full'
+            // Uncomment the following line if you want to see test logs in gradlew run.
+            showStandardStreams true
+        }
+        forkEvery = 1
+
+        var coresDivider = project.hasProperty("jacoco") ? 4 : 2 // penalize jacoco build to reduce load and random timeouts
+        maxParallelForks = Math.max(Runtime.runtime.availableProcessors().intdiv(coresDivider), 1) ?: 1
+
+        // Captures the list of failed tests to log after build is done.
+        afterTest { TestDescriptor descriptor, TestResult result ->
+            if (result.resultType == org.gradle.api.tasks.testing.TestResult.ResultType.FAILURE) {
+                failedTests << ["${descriptor.className}::${descriptor.name}"]
+            }
+        }
+    }
+
+    // print out tracked failed tests when the build has finished
+    gradle.buildFinished {
+        if (!failedTests.empty) {
+            println "Failed tests for ${project.name}:"
+            failedTests.each { failedTest ->
+                println failedTest
+            }
+            println ""
+        }
+    }
+    afterEvaluate { subproject ->
+        jar {
+            manifest {
+                attributes(
+                        "Implementation-Title": subproject.description,
+                        "Implementation-Version": subproject.version,
+                        "Implementation-Vendor": "Temporal Technologies Inc.",
+                        'Build-Time': new Date().format("yyyy-MM-dd'T'HH:mm:ssZ"),
+                )
+            }
+        }
+    }
+}

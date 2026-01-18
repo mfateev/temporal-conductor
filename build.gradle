@@ -1,0 +1,50 @@
+// Minimal build configuration compatible with Java 25
+apply plugin: 'base'
+
+allprojects {
+    repositories {
+        mavenCentral()
+    }
+}
+
+// Version properties
+ext {
+    temporalVersion = '1.29.2'
+    conductorVersion = '3.24.3'
+    grpcVersion = '1.58.1'
+    jacksonVersion = '2.15.4'
+    slf4jVersion = '1.7.36'
+    logbackVersion = '1.2.11'
+    guavaVersion = '32.0.1-jre'
+    gsonVersion = '2.10.1'
+    junitVersion = '4.13.2'
+    mockitoVersion = '5.14.2'
+}
+
+// Apply common configuration to subprojects
+subprojects {
+    apply plugin: 'java-library'
+
+    java {
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
+    }
+
+    compileJava {
+        options.encoding = 'UTF-8'
+        options.compilerArgs << '-parameters'
+    }
+
+    compileTestJava {
+        options.encoding = 'UTF-8'
+        options.compilerArgs << '-parameters'
+    }
+
+    test {
+        testLogging {
+            events 'passed', 'skipped', 'failed'
+            exceptionFormat = 'full'
+            showStandardStreams = true
+        }
+    }
+}

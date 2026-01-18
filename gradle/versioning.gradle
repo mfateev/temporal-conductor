@@ -1,0 +1,62 @@
+// v0.20.0-2-g000a42a -> 0.20.0-2-g000a42a
+ext.getTag = { ->
+    def stdout = new ByteArrayOutputStream()
+    try {
+        exec {
+            commandLine 'git', 'describe', '--tags'
+            standardOutput = stdout
+        }
+    } catch (ignored) {
+        return "unknown"
+    }
+    return stdout.toString().trim().substring(1)
+}
+
+// Determine a version name based on git tag. It is used to name JAR files
+// The following rules applies:
+// 0.20.2 -> 0.20.2
+// 0.20.2-RC1 -> 0.20.2-RC1
+// 0.20.2-g000a42a -> 0.21.0-SNAPSHOT
+// 0.20.2-somepostfix-g000a42a -> 0.21.0-SNAPSHOT
+// 0.20.2-RC1-g000a42a -> 0.20.2-SNAPSHOT
+// 0.20.2-RC1-somepostfix-g000a42a -> 0.20.2-SNAPSHOT
+ext.getVersionName = { ->
+    String tag = getTag()
+
+    // The last element of describe should start with g according to git describe format
+    // if we are not exactly on a tag. If it doesn't - we are on a tag
+    def match = (tag =~ /^(\d+)[.](\d+)[.](\d+)(?:-RC(\d+))?(-.*?)?(-g[0-9a-f]+)?$/)
+    if (match.size() == 0) {
+        return "unknown"
+    }
+    def (_, major, minor, patch, rc, extra, git) = match[0];
+
+    if (git) {
+        if (rc) {
+            return "${major}.${minor}.${patch}-SNAPSHOT";
+        } else {
+            return "${major}.${(minor as int) + 1}.0-SNAPSHOT";
+        }
+    } else {
+        return tag
+    }
+}
+
+// 0.20.0-SNAPSHOT -> 0.20.0
+// 0.20.0 -> 0.20.0
+// Stored int version.properties which is loaded
+// and used as a value of temporal-client-version gRPC header.
+ext.getClientVersionName = { ->
+    def split = getVersionName().split('-')
+    return split[0]
+}
+
+group = 'io.temporal'
+version = getVersionName()
+
+subprojects {
+    apply plugin: "com.palantir.git-version"
+
+    group = 'io.temporal'
+    version = getVersionName()
+}
