@@ -1,11 +1,9 @@
 package io.temporal.conductor.poc;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.netflix.conductor.common.metadata.tasks.Task;
-import com.netflix.conductor.common.metadata.tasks.Task.Status;
 import com.netflix.conductor.common.metadata.tasks.TaskType;
 import com.netflix.conductor.common.metadata.workflow.WorkflowDef;
-import com.netflix.conductor.common.run.Workflow;
+import com.netflix.conductor.core.config.ConductorProperties;
 import com.netflix.conductor.core.execution.DeciderService;
 import com.netflix.conductor.core.execution.mapper.SimpleTaskMapper;
 import com.netflix.conductor.core.execution.mapper.TaskMapper;
@@ -55,8 +53,9 @@ public class DeciderServicePOCTest {
     ObjectMapper objectMapper = new ObjectMapper();
     MinimalParametersUtils parametersUtils = new MinimalParametersUtils(objectMapper);
     NoOpExternalPayloadStorage externalStorage = new NoOpExternalPayloadStorage();
+    ConductorProperties conductorProperties = new ConductorProperties();
     MinimalExternalPayloadStorageUtils externalPayloadStorageUtils =
-        new MinimalExternalPayloadStorageUtils(externalStorage);
+        new MinimalExternalPayloadStorageUtils(externalStorage, conductorProperties, objectMapper);
     MinimalSystemTaskRegistry systemTaskRegistry = new MinimalSystemTaskRegistry();
 
     // Create task mappers (just SIMPLE for POC)
@@ -152,35 +151,35 @@ public class DeciderServicePOCTest {
     logger.info("=== Test: Execution DAO Basics ===");
 
     // Create a test workflow
-    Workflow workflow = new Workflow();
+    WorkflowModel workflow = new WorkflowModel();
     workflow.setWorkflowId("test-" + UUID.randomUUID());
     workflow.setWorkflowName("simple-test");
-    workflow.setStatus(Workflow.WorkflowStatus.RUNNING);
+    workflow.setStatus(WorkflowModel.Status.RUNNING);
 
     executionDAO.createWorkflow(workflow);
 
     // Retrieve and verify
-    Workflow retrieved = executionDAO.getWorkflow(workflow.getWorkflowId());
+    WorkflowModel retrieved = executionDAO.getWorkflow(workflow.getWorkflowId());
     assertNotNull("Workflow should be retrievable", retrieved);
     assertEquals(workflow.getWorkflowId(), retrieved.getWorkflowId());
-    assertEquals(Workflow.WorkflowStatus.RUNNING, retrieved.getStatus());
+    assertEquals(WorkflowModel.Status.RUNNING, retrieved.getStatus());
 
     // Create tasks
-    Task task1 = new Task();
+    TaskModel task1 = new TaskModel();
     task1.setTaskId(UUID.randomUUID().toString());
     task1.setTaskDefName("task1");
     task1.setWorkflowInstanceId(workflow.getWorkflowId());
-    task1.setStatus(Status.SCHEDULED);
+    task1.setStatus(TaskModel.Status.SCHEDULED);
 
     executionDAO.createTasks(List.of(task1));
 
     // Retrieve task
-    Task retrievedTask = executionDAO.getTask(task1.getTaskId());
+    TaskModel retrievedTask = executionDAO.getTask(task1.getTaskId());
     assertNotNull("Task should be retrievable", retrievedTask);
     assertEquals(task1.getTaskId(), retrievedTask.getTaskId());
 
     // Get workflow with tasks
-    Workflow withTasks = executionDAO.getWorkflow(workflow.getWorkflowId(), true);
+    WorkflowModel withTasks = executionDAO.getWorkflow(workflow.getWorkflowId(), true);
     assertNotNull(withTasks.getTasks());
     assertEquals(1, withTasks.getTasks().size());
 

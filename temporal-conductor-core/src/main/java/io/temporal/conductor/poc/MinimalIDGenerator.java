@@ -4,7 +4,7 @@ import com.netflix.conductor.core.utils.IDGenerator;
 import java.util.UUID;
 
 /** Minimal implementation of IDGenerator for POC testing. */
-public class MinimalIDGenerator implements IDGenerator {
+public class MinimalIDGenerator extends IDGenerator {
 
   @Override
   public String generate() {

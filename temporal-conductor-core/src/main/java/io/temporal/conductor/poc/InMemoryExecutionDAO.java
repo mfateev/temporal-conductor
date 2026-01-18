@@ -1,12 +1,12 @@
 package io.temporal.conductor.poc;
 
 import com.netflix.conductor.common.metadata.tasks.PollData;
-import com.netflix.conductor.common.metadata.tasks.Task;
 import com.netflix.conductor.common.metadata.tasks.TaskExecLog;
-import com.netflix.conductor.common.run.Workflow;
 import com.netflix.conductor.core.events.queue.Message;
 import com.netflix.conductor.dao.ExecutionDAO;
 import com.netflix.conductor.dao.PollDataDAO;
+import com.netflix.conductor.model.TaskModel;
+import com.netflix.conductor.model.WorkflowModel;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
@@ -16,17 +16,19 @@ import org.slf4j.LoggerFactory;
 /**
  * In-memory implementation of ExecutionDAO for POC testing. Stores workflow and task execution
  * state in HashMap structures. Designed for single-threaded use within a Temporal workflow.
+ *
+ * <p>Uses domain models (WorkflowModel/TaskModel) as required by ExecutionDAO interface.
  */
 public class InMemoryExecutionDAO implements ExecutionDAO, PollDataDAO {
   private static final Logger logger = LoggerFactory.getLogger(InMemoryExecutionDAO.class);
 
-  private final Map<String, Workflow> workflows = new ConcurrentHashMap<>();
-  private final Map<String, Task> tasks = new ConcurrentHashMap<>();
-  private final Map<String, List<Task>> workflowToTasks = new ConcurrentHashMap<>();
+  private final Map<String, WorkflowModel> workflows = new ConcurrentHashMap<>();
+  private final Map<String, TaskModel> tasks = new ConcurrentHashMap<>();
+  private final Map<String, List<TaskModel>> workflowToTasks = new ConcurrentHashMap<>();
 
   @Override
-  public List<Task> createTasks(List<Task> tasks) {
-    for (Task task : tasks) {
+  public List<TaskModel> createTasks(List<TaskModel> tasks) {
+    for (TaskModel task : tasks) {
       this.tasks.put(task.getTaskId(), task);
       workflowToTasks.computeIfAbsent(task.getWorkflowInstanceId(), k -> new ArrayList<>()).add(task);
       logger.debug(
@@ -39,7 +41,7 @@ public class InMemoryExecutionDAO implements ExecutionDAO, PollDataDAO {
   }
 
   @Override
-  public void updateTask(Task task) {
+  public void updateTask(TaskModel task) {
     tasks.put(task.getTaskId(), task);
     logger.debug(
         "Updated task: {} ({}) status={}",
@@ -49,39 +51,39 @@ public class InMemoryExecutionDAO implements ExecutionDAO, PollDataDAO {
   }
 
   @Override
-  public boolean exceedsInProgressLimit(Task task) {
+  public boolean exceedsInProgressLimit(TaskModel task) {
     return false; // No limits for POC
   }
 
   @Override
-  public boolean exceedsRateLimitPerFrequency(Task task) {
+  public boolean exceedsRateLimitPerFrequency(TaskModel task) {
     return false; // No limits for POC
   }
 
   @Override
-  public Task getTask(String taskId) {
+  public TaskModel getTask(String taskId) {
     return tasks.get(taskId);
   }
 
   @Override
-  public List<Task> getTasks(List<String> taskIds) {
+  public List<TaskModel> getTasks(List<String> taskIds) {
     return taskIds.stream().map(tasks::get).filter(Objects::nonNull).collect(Collectors.toList());
   }
 
   @Override
-  public List<Task> getTasksForWorkflow(String workflowId) {
+  public List<TaskModel> getTasksForWorkflow(String workflowId) {
     return workflowToTasks.getOrDefault(workflowId, Collections.emptyList());
   }
 
   @Override
-  public String createWorkflow(Workflow workflow) {
+  public String createWorkflow(WorkflowModel workflow) {
     workflows.put(workflow.getWorkflowId(), workflow);
     logger.info("Created workflow: {} ({})", workflow.getWorkflowName(), workflow.getWorkflowId());
     return workflow.getWorkflowId();
   }
 
   @Override
-  public String updateWorkflow(Workflow workflow) {
+  public String updateWorkflow(WorkflowModel workflow) {
     workflows.put(workflow.getWorkflowId(), workflow);
     logger.debug(
         "Updated workflow: {} ({}) status={}",
@@ -99,15 +101,20 @@ public class InMemoryExecutionDAO implements ExecutionDAO, PollDataDAO {
   }
 
   @Override
-  public Workflow getWorkflow(String workflowId) {
+  public void removeFromPendingWorkflow(String workflowType, String workflowId) {
+    // No-op for POC (we don't track pending workflows separately)
+  }
+
+  @Override
+  public WorkflowModel getWorkflow(String workflowId) {
     return workflows.get(workflowId);
   }
 
   @Override
-  public Workflow getWorkflow(String workflowId, boolean includeTasks) {
-    Workflow workflow = workflows.get(workflowId);
+  public WorkflowModel getWorkflow(String workflowId, boolean includeTasks) {
+    WorkflowModel workflow = workflows.get(workflowId);
     if (workflow != null && includeTasks) {
-      List<Task> workflowTasks = workflowToTasks.getOrDefault(workflowId, Collections.emptyList());
+      List<TaskModel> workflowTasks = workflowToTasks.getOrDefault(workflowId, Collections.emptyList());
       workflow.setTasks(new ArrayList<>(workflowTasks));
     }
     return workflow;
@@ -115,9 +122,9 @@ public class InMemoryExecutionDAO implements ExecutionDAO, PollDataDAO {
 
   @Override
   public boolean removeTask(String taskId) {
-    Task task = tasks.remove(taskId);
+    TaskModel task = tasks.remove(taskId);
     if (task != null) {
-      List<Task> workflowTasks = workflowToTasks.get(task.getWorkflowInstanceId());
+      List<TaskModel> workflowTasks = workflowToTasks.get(task.getWorkflowInstanceId());
       if (workflowTasks != null) {
         workflowTasks.removeIf(t -> t.getTaskId().equals(taskId));
       }
@@ -129,7 +136,7 @@ public class InMemoryExecutionDAO implements ExecutionDAO, PollDataDAO {
   // Unsupported operations for POC - minimal implementations
 
   @Override
-  public List<Task> getPendingTasksForTaskType(String taskType) {
+  public List<TaskModel> getPendingTasksForTaskType(String taskType) {
     return Collections.emptyList();
   }
 
@@ -139,7 +146,7 @@ public class InMemoryExecutionDAO implements ExecutionDAO, PollDataDAO {
   }
 
   @Override
-  public List<Workflow> getPendingWorkflowsByType(String workflowName, int version) {
+  public List<WorkflowModel> getPendingWorkflowsByType(String workflowName, int version) {
     return Collections.emptyList();
   }
 
@@ -154,7 +161,7 @@ public class InMemoryExecutionDAO implements ExecutionDAO, PollDataDAO {
         .filter(
             w ->
                 w.getWorkflowName().equals(workflowName)
-                    && w.getStatus().equals(Workflow.WorkflowStatus.RUNNING))
+                    && w.getStatus().equals(WorkflowModel.Status.RUNNING))
         .count();
   }
 
@@ -164,18 +171,18 @@ public class InMemoryExecutionDAO implements ExecutionDAO, PollDataDAO {
         .filter(
             w ->
                 w.getWorkflowName().equals(workflowName)
-                    && w.getStatus().equals(Workflow.WorkflowStatus.RUNNING))
-        .map(Workflow::getWorkflowId)
+                    && w.getStatus().equals(WorkflowModel.Status.RUNNING))
+        .map(WorkflowModel::getWorkflowId)
         .collect(Collectors.toList());
   }
 
   @Override
-  public List<Workflow> getWorkflowsByType(String workflowName, Long startTime, Long endTime) {
+  public List<WorkflowModel> getWorkflowsByType(String workflowName, Long startTime, Long endTime) {
     return Collections.emptyList();
   }
 
   @Override
-  public List<Workflow> getWorkflowsByCorrelationId(
+  public List<WorkflowModel> getWorkflowsByCorrelationId(
       String workflowName, String correlationId, boolean includeTasks) {
     return Collections.emptyList();
   }
@@ -206,8 +213,9 @@ public class InMemoryExecutionDAO implements ExecutionDAO, PollDataDAO {
   }
 
   @Override
-  public void addEventExecution(com.netflix.conductor.common.metadata.events.EventExecution ee) {
+  public boolean addEventExecution(com.netflix.conductor.common.metadata.events.EventExecution ee) {
     // No-op for POC
+    return true;
   }
 
   @Override

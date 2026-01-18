@@ -37,7 +37,7 @@ public class InMemoryMetadataDAO implements MetadataDAO {
   }
 
   @Override
-  public void update(WorkflowDef def) {
+  public void updateWorkflowDef(WorkflowDef def) {
     workflowDefs.put(def.getName(), def);
     logger.debug("Updated workflow def: {}", def.getName());
   }
@@ -74,15 +74,17 @@ public class InMemoryMetadataDAO implements MetadataDAO {
   }
 
   @Override
-  public void createTaskDef(TaskDef taskDef) {
+  public TaskDef createTaskDef(TaskDef taskDef) {
     taskDefs.put(taskDef.getName(), taskDef);
     logger.debug("Created task def: {}", taskDef.getName());
+    return taskDef;
   }
 
   @Override
-  public void updateTaskDef(TaskDef taskDef) {
+  public TaskDef updateTaskDef(TaskDef taskDef) {
     taskDefs.put(taskDef.getName(), taskDef);
     logger.debug("Updated task def: {}", taskDef.getName());
+    return taskDef;
   }
 
   @Override
