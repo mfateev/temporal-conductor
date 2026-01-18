@@ -1,22 +1,17 @@
 package io.temporal.conductor.poc;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.netflix.conductor.common.metadata.tasks.Task;
 import com.netflix.conductor.common.metadata.tasks.Task.Status;
+import com.netflix.conductor.common.metadata.tasks.TaskType;
 import com.netflix.conductor.common.metadata.workflow.WorkflowDef;
 import com.netflix.conductor.common.run.Workflow;
-import com.netflix.conductor.core.WorkflowContext;
-import com.netflix.conductor.core.config.ConductorProperties;
-import com.netflix.conductor.core.dal.ExecutionDAOFacade;
 import com.netflix.conductor.core.execution.DeciderService;
-import com.netflix.conductor.core.execution.WorkflowExecutor;
-import com.netflix.conductor.core.execution.tasks.SystemTaskRegistry;
-import com.netflix.conductor.core.metadata.MetadataMapperService;
-import com.netflix.conductor.core.utils.ExternalPayloadStorageUtils;
-import com.netflix.conductor.core.utils.IDGenerator;
-import com.netflix.conductor.core.utils.ParametersUtils;
-import com.netflix.conductor.dao.MetadataDAO;
+import com.netflix.conductor.core.execution.mapper.SimpleTaskMapper;
+import com.netflix.conductor.core.execution.mapper.TaskMapper;
 import com.netflix.conductor.model.TaskModel;
 import com.netflix.conductor.model.WorkflowModel;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -55,10 +50,31 @@ public class DeciderServicePOCTest {
     metadataDAO.registerSimpleTask("task2");
     metadataDAO.registerSimpleWorkflow("simple-test", "task1", "task2");
 
-    // TODO: Instantiate DeciderService with minimal dependencies
-    // This will require identifying all constructor dependencies
-    // and creating minimal implementations
+    // Create minimal dependencies for DeciderService
+    MinimalIDGenerator idGenerator = new MinimalIDGenerator();
+    ObjectMapper objectMapper = new ObjectMapper();
+    MinimalParametersUtils parametersUtils = new MinimalParametersUtils(objectMapper);
+    NoOpExternalPayloadStorage externalStorage = new NoOpExternalPayloadStorage();
+    MinimalExternalPayloadStorageUtils externalPayloadStorageUtils =
+        new MinimalExternalPayloadStorageUtils(externalStorage);
+    MinimalSystemTaskRegistry systemTaskRegistry = new MinimalSystemTaskRegistry();
 
+    // Create task mappers (just SIMPLE for POC)
+    Map<String, TaskMapper> taskMappers = new HashMap<>();
+    taskMappers.put(TaskType.SIMPLE.name(), new SimpleTaskMapper(parametersUtils));
+
+    // Instantiate DeciderService
+    deciderService =
+        new DeciderService(
+            idGenerator,
+            parametersUtils,
+            metadataDAO,
+            externalPayloadStorageUtils,
+            systemTaskRegistry,
+            taskMappers,
+            Duration.ofMinutes(60));
+
+    logger.info("✓ DeciderService instantiated successfully without Spring!");
     logger.info("Setup complete");
   }
 

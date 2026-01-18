@@ -4,9 +4,9 @@ dependencies {
     // Temporal SDK
     api "io.temporal:temporal-sdk:${temporalVersion}"
 
-    // Conductor API models
-    implementation "org.conductoross:conductor-common:${conductorVersion}"
-    implementation "org.conductoross:conductor-core:${conductorVersion}"
+    // Conductor API models (using published version from Maven Central)
+    implementation "com.netflix.conductor:conductor-common:3.15.0"
+    implementation "com.netflix.conductor:conductor-core:3.15.0"
 
     // Jackson for JSON serialization
     implementation "com.fasterxml.jackson.core:jackson-databind:${jacksonVersion}"

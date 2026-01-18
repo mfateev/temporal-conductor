@@ -1,4 +1,4 @@
-// Minimal build configuration compatible with Java 25
+// Build configuration for temporal-conductor POC
 apply plugin: 'base'
 
 allprojects {
@@ -9,7 +9,7 @@ allprojects {
 
 // Version properties
 ext {
-    temporalVersion = '1.29.2'
+    temporalVersion = '1.30.1'
     conductorVersion = '3.24.3'
     grpcVersion = '1.58.1'
     jacksonVersion = '2.15.4'
@@ -26,8 +26,8 @@ subprojects {
     apply plugin: 'java-library'
 
     java {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
     }
 
     compileJava {

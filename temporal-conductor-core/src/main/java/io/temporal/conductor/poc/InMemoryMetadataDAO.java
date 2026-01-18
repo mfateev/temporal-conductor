@@ -31,7 +31,7 @@ public class InMemoryMetadataDAO implements MetadataDAO {
   }
 
   @Override
-  public void create WorkflowDef(WorkflowDef def) {
+  public void createWorkflowDef(WorkflowDef def) {
     workflowDefs.put(def.getName(), def);
     logger.debug("Created workflow def: {}", def.getName());
   }
