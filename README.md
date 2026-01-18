@@ -8,7 +8,9 @@ This project provides a system to execute [Netflix Conductor](https://conductor-
 
 ## Build Requirements
 
-- **Java**: JDK 11, 17, or 21 (Java 25 not yet supported by Gradle 8.x)
+- **Java**: JDK 11+ (minimum requirement from Conductor)
+  - Compatible: Java 11, 17, 21
+  - Not compatible: Java 25 (Gradle 8.x limitation)
 - **Gradle**: 8.12+ (wrapper included)
 
 ## Building
@@ -17,7 +19,7 @@ This project provides a system to execute [Netflix Conductor](https://conductor-
 ./gradlew build
 ```
 
-**Note**: Current build requires Java 21 or earlier due to Gradle/Groovy compatibility.
+**Note**: Requires Java 11-21. Java 25 is not yet supported by Gradle 8.x's Groovy compiler.
 
 ## Modules
 

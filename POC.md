@@ -79,13 +79,18 @@ This document tracks the implementation status of the 5 critical POCs outlined i
 The code is ready but cannot be compiled until a compatible Java version is available. To run:
 
 ```bash
-# Option 1: Use Java 21
-sdk install java 21.0.1-tem
-sdk use java 21.0.1-tem
+# Option 1: Use Java 11 (minimum requirement)
+sdk install java 11.0.21-tem
+sdk use java 11.0.21-tem
 ./gradlew test --tests DeciderServicePOCTest
 
-# Option 2: Use Docker with Java 21
-docker run --rm -v $(pwd):/workspace -w /workspace gradle:8.12-jdk21 \
+# Option 2: Use Java 17 or 21 (newer LTS versions)
+sdk install java 17.0.9-tem
+sdk use java 17.0.9-tem
+./gradlew test --tests DeciderServicePOCTest
+
+# Option 3: Use Docker with Java 11
+docker run --rm -v $(pwd):/workspace -w /workspace gradle:8.12-jdk11 \
   ./gradlew test --tests DeciderServicePOCTest
 ```
 
