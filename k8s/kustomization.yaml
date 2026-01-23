@@ -1,0 +1,20 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: conductor-server
+
+namespace: conductor
+
+resources:
+  - configmap.yaml
+  - deployment.yaml
+  - service.yaml
+  - hpa.yaml
+
+commonLabels:
+  app.kubernetes.io/part-of: temporal-conductor
+
+images:
+  - name: conductor-server-temporal
+    newTag: latest
