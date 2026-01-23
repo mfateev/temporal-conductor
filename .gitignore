@@ -1,0 +1,34 @@
+# Git worktrees (reference repos)
+/conductor/
+
+# Build outputs
+**/build/
+**/.gradle/
+*.class
+*.jar
+*.war
+
+# Gradle
+.gradle/
+gradle-app.setting
+!gradle-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.project
+.classpath
+.settings/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Local configuration
+local.properties
+*.local

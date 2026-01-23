@@ -1,0 +1,136 @@
+services:
+  # PostgreSQL for Temporal
+  postgresql:
+    image: postgres:15-alpine
+    container_name: temporal-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=temporal
+      - POSTGRES_PASSWORD=temporal
+      - POSTGRES_DB=temporal
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Temporal Server (development mode)
+  temporal:
+    image: temporalio/auto-setup:1.25.0
+    container_name: temporal
+    ports:
+      - "7233:7233"   # gRPC frontend
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_USER=temporal
+      - POSTGRES_PWD=temporal
+      - POSTGRES_SEEDS=postgresql
+      - ENABLE_ES=false
+    depends_on:
+      postgresql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "tctl", "--address", "temporal:7233", "cluster", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # Temporal Web UI
+  temporal-ui:
+    image: temporalio/ui:2.31.0
+    container_name: temporal-ui
+    ports:
+      - "8088:8080"
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_CORS_ORIGINS=http://localhost:3000
+    depends_on:
+      temporal:
+        condition: service_healthy
+
+  # Conductor Server (with Temporal backend)
+  conductor-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: conductor-server
+    ports:
+      - "8081:8080"   # Conductor REST API (8081 to avoid conflict with Temporal UI)
+    environment:
+      - SPRING_PROFILES_ACTIVE=temporal
+      - TEMPORAL_SERVICE_ADDRESS=temporal:7233
+      - TEMPORAL_NAMESPACE=default
+      - JAVA_OPTS=-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0
+    depends_on:
+      temporal:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/actuator/health/liveness"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  # Conductor UI (official conductor-oss image, running nginx only)
+  # Uses the official UI from conductoross/conductor-standalone but only starts nginx
+  # Custom nginx config proxies /api to our conductor-server
+  conductor-ui:
+    image: conductoross/conductor-standalone:3.15.0
+    container_name: conductor-ui
+    ports:
+      - "5001:5000"
+    volumes:
+      - ./docker/conductor-ui-nginx.conf:/etc/nginx/http.d/default.conf:ro
+    entrypoint: ["nginx", "-g", "daemon off;"]
+    depends_on:
+      conductor-server:
+        condition: service_healthy
+
+  # Demo initialization (registers search attributes and sample workflows)
+  demo-init:
+    image: temporalio/admin-tools:latest
+    container_name: demo-init
+    volumes:
+      - ./scripts/init-demo.sh:/init-demo.sh:ro
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_NAMESPACE=default
+      - CONDUCTOR_ADDRESS=conductor-server:8080
+    entrypoint: ["/bin/bash", "/init-demo.sh"]
+    depends_on:
+      conductor-server:
+        condition: service_healthy
+    restart: "no"
+
+  # Conductor Server (stub mode - for testing without Temporal)
+  conductor-server-stub:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: conductor-server-stub
+    ports:
+      - "8082:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=stub
+      - JAVA_OPTS=-XX:+UseContainerSupport -XX:MaxRAMPercentage=50.0
+    profiles:
+      - stub
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/actuator/health/liveness"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  postgres-data:
+    driver: local
+
+networks:
+  default:
+    name: conductor-network

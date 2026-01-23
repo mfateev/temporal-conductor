@@ -1,0 +1,13 @@
+{
+  "task_name": "temporal-conductor",
+  "created": "2026-01-17T11:44:00Z",
+  "description": "Execute Conductor workflows using Temporal",
+  "repositories": [
+    {
+      "name": "conductor",
+      "upstream_url": "https://github.com/conductor-oss/conductor.git",
+      "branch": "temporal-conductor-ref",
+      "purpose": "reference"
+    }
+  ]
+}

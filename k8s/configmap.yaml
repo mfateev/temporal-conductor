@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: conductor-server-config
+  labels:
+    app: conductor-server
+    app.kubernetes.io/name: conductor-server
+    app.kubernetes.io/component: config
+data:
+  SPRING_PROFILES_ACTIVE: "temporal"
+  TEMPORAL_NAMESPACE: "conductor"
+  TEMPORAL_TASK_QUEUE: "conductor-workflows"
+  JAVA_OPTS: "-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -Djava.security.egd=file:/dev/./urandom"
+  # Logging configuration
+  LOGGING_LEVEL_IO_TEMPORAL_CONDUCTOR: "INFO"
+  LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_WEB: "INFO"

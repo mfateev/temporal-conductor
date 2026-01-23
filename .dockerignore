@@ -1,0 +1,42 @@
+# Git
+.git
+.gitignore
+
+# Build outputs
+**/build
+**/out
+**/target
+**/*.class
+
+# IDE files
+.idea
+*.iml
+.vscode
+*.swp
+
+# Gradle cache (not wrapper)
+.gradle
+
+# Archive (POC modules)
+archive/
+
+# Documentation
+*.md
+!k8s/README.md
+
+# Design docs
+design/
+
+# Conductor reference (not needed for build)
+conductor/
+
+# Docker and K8s
+Dockerfile
+docker-compose.yml
+k8s/
+
+# Local development
+*.log
+*.tmp
+.env
+.env.local
