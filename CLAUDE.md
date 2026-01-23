@@ -86,14 +86,8 @@ temporal-conductor/
 ## Running Locally
 
 ```bash
-# Start Temporal dev server
-temporal server start-dev --namespace conductor
-
-# Register search attributes (first time only)
-temporal operator search-attribute create --namespace conductor \
-  --name ConductorWorkflowType --type Keyword
-temporal operator search-attribute create --namespace conductor \
-  --name ConductorStatus --type Keyword
+# Start Temporal and register all required search attributes
+./scripts/start-temporal.sh
 
 # Start the server with Temporal profile
 SPRING_PROFILES_ACTIVE=temporal ./gradlew :temporal-conductor:bootRun
@@ -103,6 +97,7 @@ SPRING_PROFILES_ACTIVE=stub ./gradlew :temporal-conductor:bootRun
 ```
 
 **Swagger UI**: http://localhost:8080/swagger-ui.html
+**Temporal UI**: http://localhost:8233
 
 ## Determinism Requirements
 
