@@ -2,7 +2,110 @@
 
 This guide demonstrates how to use Conductor workflows executed on Temporal.
 
-## Quick Start
+## Local Development (Recommended for Demo)
+
+Start the services locally without Docker Compose:
+
+### Terminal 1: Start Temporal Server
+
+```bash
+# Start Temporal dev server with all required search attributes
+./scripts/start-temporal.sh
+```
+
+### Terminal 2: Start Conductor Server
+
+```bash
+# Start the Conductor server with Temporal profile
+SPRING_PROFILES_ACTIVE=temporal ./gradlew :temporal-conductor:bootRun
+```
+
+### Terminal 3: Start Conductor UI
+
+```bash
+# Run the Conductor UI pointing to local server
+docker run -d --name conductor-ui \
+  -p 5001:5000 \
+  -e WF_SERVER=http://host.docker.internal:8080/api \
+  conductoross/conductor-ui:latest
+```
+
+### Service URLs
+
+| Service | URL | Purpose |
+|---------|-----|---------|
+| **Conductor UI** | http://localhost:5001 | Start and monitor workflows |
+| **Temporal UI** | http://localhost:8233 | View Temporal execution details |
+| **Swagger UI** | http://localhost:8080/swagger-ui.html | REST API documentation |
+
+---
+
+## Starting a Workflow from Conductor UI
+
+### Step 1: Open Conductor UI
+
+Navigate to **http://localhost:5001**
+
+### Step 2: Register a Demo Workflow
+
+Use Swagger UI (http://localhost:8080/swagger-ui.html) or curl to register:
+
+```bash
+# Register task definition
+curl -X POST http://localhost:8080/api/metadata/taskdefs \
+  -H "Content-Type: application/json" \
+  -d '[{"name": "greet", "timeoutSeconds": 0, "responseTimeoutSeconds": 0}]'
+
+# Register workflow definition
+curl -X POST http://localhost:8080/api/metadata/workflow \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "hello_workflow",
+    "version": 1,
+    "tasks": [
+      {
+        "name": "greet",
+        "taskReferenceName": "greet_task",
+        "type": "SIMPLE",
+        "inputParameters": {
+          "name": "${workflow.input.userName}"
+        }
+      }
+    ],
+    "outputParameters": {
+      "greeting": "${greet_task.output.message}"
+    }
+  }'
+```
+
+### Step 3: Start Workflow from Conductor UI
+
+1. In Conductor UI, go to **Definitions** in the left menu
+2. Click on `hello_workflow`
+3. Click **Run Workflow** button
+4. Enter input: `{"userName": "Alice"}`
+5. Click **Execute**
+
+### Step 4: View Progress in Both UIs
+
+**Conductor UI (http://localhost:5001):**
+- Go to **Executions** to see the running workflow
+- Click on the workflow ID to see task progress
+- View input/output for each task
+
+**Temporal UI (http://localhost:8233):**
+- Go to **Workflows** tab
+- Filter by namespace `conductor`
+- Click on the workflow to see:
+  - Event history (detailed execution log)
+  - Search attributes (ConductorWorkflowType, ConductorStatus)
+  - Pending activities
+
+---
+
+## Docker Compose (Full Stack)
+
+For a complete pre-configured environment:
 
 ```bash
 # Start all services (includes automatic demo initialization)
@@ -26,7 +129,9 @@ The `demo-init` container automatically:
    - `parallel_fetch_workflow` - Fork/Join parallel execution
    - `order_processing_workflow` - Conditional SWITCH logic
 
-## Running Demo Workflows
+---
+
+## Running Demo Workflows (curl)
 
 ```bash
 # Simple sequential workflow
@@ -438,45 +543,78 @@ curl -X PUT http://localhost:8081/api/workflow/{workflowId}/resume
 - No code generation - workflow is interpreted at runtime
 - Temporal provides durability, retries, and observability
 
-### 2. Conductor UI - Execute Workflows (http://localhost:5001)
-- Navigate to **Workbench** to execute workflows
-- Or go to **Definitions** → select a workflow → click **Run Workflow**
+### 2. Side-by-Side UI Demo (Open Both!)
+
+Open **two browser windows side by side**:
+- **Left**: Conductor UI (http://localhost:5001)
+- **Right**: Temporal UI (http://localhost:8233)
+
+### 3. Conductor UI - Start and Monitor (http://localhost:5001)
+- Navigate to **Definitions** → select a workflow → click **Run Workflow**
 - Enter input parameters and execute
-- View execution status and task progress
+- Go to **Executions** to see the workflow running
+- Click on workflow ID to see:
+  - Task status progression
+  - Input/output for each task
+  - Workflow timeline
 
-### 3. Conductor UI - View Definitions (http://localhost:5001)
-- Show workflow definitions (under Definitions)
-- Show workflow executions (under Executions)
-- Show task status in execution detail view
-
-### 4. Temporal UI (http://localhost:8088)
-- Show the underlying Temporal workflow
-- Show event history
-- Show search attributes (ConductorWorkflowType, ConductorStatus)
+### 4. Temporal UI - Execution Details (http://localhost:8233)
+- See the workflow appear in real-time
+- Click on the workflow to show:
+  - **Event History**: Every state transition logged
+  - **Pending Activities**: Tasks waiting for execution
+  - **Search Attributes**: ConductorWorkflowType, ConductorStatus
+- Show **Stack Trace** tab during activity execution
+- Show **Queries** tab to query workflow state
 
 ### 5. Key Benefits
 - **Durability**: Temporal's event sourcing survives crashes
 - **Scalability**: Temporal scales to millions of workflows
-- **Observability**: Full execution history in Temporal UI
+- **Observability**: Full execution history in both UIs
 - **Compatibility**: Run existing Conductor workflows unchanged
+- **Dual Visibility**: Monitor from either Conductor or Temporal UI
 
 ---
 
 ## Troubleshooting
 
-### Check service logs
+### Local Development
+
 ```bash
+# Check Conductor server logs
+tail -f /tmp/conductor-server.log
+
+# Check Temporal server logs
+tail -f /tmp/temporal-server.log
+
+# Restart Temporal (clean state)
+pkill -f "temporal server"
+./scripts/start-temporal.sh
+
+# Stop Conductor UI container
+docker stop conductor-ui && docker rm conductor-ui
+```
+
+### Docker Compose
+
+```bash
+# Check service logs
 docker compose logs conductor-server -f
 docker compose logs temporal -f
-```
 
-### Restart services
-```bash
+# Restart services
 docker compose restart conductor-server
-```
 
-### Full reset
-```bash
+# Full reset
 docker compose down -v
 docker compose up -d
+```
+
+## Cleanup (Local Development)
+
+```bash
+# Stop all services
+pkill -f "temporal server"
+pkill -f "bootRun"
+docker stop conductor-ui && docker rm conductor-ui
 ```
