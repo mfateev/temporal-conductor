@@ -1,20 +1,36 @@
-target
+# Build outputs
+**/build/
+**/.gradle/
+target/
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.project
+.classpath
+.settings/
+.vscode/
+**/out/
+*/bin/
+/bin/
+
+# OS
+.DS_Store
+Thumbs.db
 .*.swp
 .*.swo
-*.iml
-.DS_Store
-.idea
-.gradle
-/build
-/*/build
-**/out
-/lib
+
+# Logs
+*.log
+
+# Local configuration
+local.properties
+*.local
+
+# Misc
+/lib/
 dummy
 $buildDir
 src/main/idls/*
-/bin
-.classpath
-.project
-.settings
-.vscode/
-*/bin

@@ -1,8 +1,0 @@
-subprojects {
-    if (name == 'temporal-bom') {
-        return
-    }
-    configurations.implementation {
-        // add global exclusions here if needed
-    }
-}
