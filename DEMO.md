@@ -2,9 +2,35 @@
 
 This guide demonstrates how to use Conductor workflows executed on Temporal.
 
-## Local Development (Recommended for Demo)
+## Docker Compose (Recommended)
 
-Start the services locally without Docker Compose:
+Start all services with a single command:
+
+```bash
+# Start Temporal + Conductor server
+docker compose up -d
+
+# Wait for initialization (registers search attributes)
+docker compose logs init-temporal -f
+
+# Services will be ready at:
+# - Conductor API:    http://localhost:8080
+# - Swagger UI:       http://localhost:8080/swagger-ui.html
+# - Temporal UI:      http://localhost:8233
+```
+
+### Stop Services
+
+```bash
+docker compose down        # Stop services
+docker compose down -v     # Stop and remove volumes (clean state)
+```
+
+---
+
+## Local Development (Alternative)
+
+For development without Docker:
 
 ### Terminal 1: Start Temporal Server
 
@@ -20,33 +46,18 @@ Start the services locally without Docker Compose:
 SPRING_PROFILES_ACTIVE=temporal ./gradlew :temporal-conductor:bootRun
 ```
 
-### Terminal 3: Start Conductor UI
-
-```bash
-# Run the Conductor UI pointing to local server
-docker run -d --name conductor-ui \
-  -p 5001:5000 \
-  -e WF_SERVER=http://host.docker.internal:8080/api \
-  conductoross/conductor-ui:latest
-```
-
 ### Service URLs
 
 | Service | URL | Purpose |
 |---------|-----|---------|
-| **Conductor UI** | http://localhost:5001 | Start and monitor workflows |
+| **Swagger UI** | http://localhost:8080/swagger-ui.html | REST API - start/monitor workflows |
 | **Temporal UI** | http://localhost:8233 | View Temporal execution details |
-| **Swagger UI** | http://localhost:8080/swagger-ui.html | REST API documentation |
 
 ---
 
-## Starting a Workflow from Conductor UI
+## Running Demo Workflows
 
-### Step 1: Open Conductor UI
-
-Navigate to **http://localhost:5001**
-
-### Step 2: Register a Demo Workflow
+### Step 1: Register a Demo Workflow
 
 Use Swagger UI (http://localhost:8080/swagger-ui.html) or curl to register:
 
@@ -78,20 +89,25 @@ curl -X POST http://localhost:8080/api/metadata/workflow \
   }'
 ```
 
-### Step 3: Start Workflow from Conductor UI
+### Step 2: Start Workflow via curl or Swagger
 
-1. In Conductor UI, go to **Definitions** in the left menu
-2. Click on `hello_workflow`
-3. Click **Run Workflow** button
-4. Enter input: `{"userName": "Alice"}`
-5. Click **Execute**
+**Using curl:**
+```bash
+curl -X POST "http://localhost:8080/api/workflow" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "hello_workflow",
+    "version": 1,
+    "input": {"userName": "Alice"}
+  }'
+```
 
-### Step 4: View Progress in Both UIs
+**Using Swagger UI:**
+1. Open http://localhost:8080/swagger-ui.html
+2. Find `POST /api/workflow`
+3. Enter the request body and execute
 
-**Conductor UI (http://localhost:5001):**
-- Go to **Executions** to see the running workflow
-- Click on the workflow ID to see task progress
-- View input/output for each task
+### Step 3: View Progress in Temporal UI
 
 **Temporal UI (http://localhost:8233):**
 - Go to **Workflows** tab
@@ -103,49 +119,21 @@ curl -X POST http://localhost:8080/api/metadata/workflow \
 
 ---
 
-## Docker Compose (Full Stack)
-
-For a complete pre-configured environment:
-
-```bash
-# Start all services (includes automatic demo initialization)
-docker compose up -d
-
-# Wait for initialization to complete (check logs)
-docker logs demo-init -f
-
-# Services will be ready at:
-# - Conductor UI:     http://localhost:5001
-# - Conductor API:    http://localhost:8081
-# - Conductor Swagger: http://localhost:8081/swagger-ui.html
-# - Temporal UI:      http://localhost:8088
-```
-
-The `demo-init` container automatically:
-1. Creates Temporal search attributes (ConductorWorkflowType, ConductorStatus, etc.)
-2. Registers sample task definitions
-3. Registers 3 demo workflows:
-   - `greeting_workflow` - Sequential workflow
-   - `parallel_fetch_workflow` - Fork/Join parallel execution
-   - `order_processing_workflow` - Conditional SWITCH logic
-
----
-
 ## Running Demo Workflows (curl)
 
 ```bash
 # Simple sequential workflow
-curl -X POST "http://localhost:8081/api/workflow/greeting_workflow" \
+curl -X POST "http://localhost:8080/api/workflow/greeting_workflow" \
   -H "Content-Type: application/json" \
   -d '{"userName": "Alice"}'
 
 # Parallel workflow
-curl -X POST "http://localhost:8081/api/workflow/parallel_fetch_workflow" \
+curl -X POST "http://localhost:8080/api/workflow/parallel_fetch_workflow" \
   -H "Content-Type: application/json" \
   -d '{"userId": "user-123"}'
 
 # Conditional workflow (try different shipping types: standard, express, premium)
-curl -X POST "http://localhost:8081/api/workflow/order_processing_workflow" \
+curl -X POST "http://localhost:8080/api/workflow/order_processing_workflow" \
   -H "Content-Type: application/json" \
   -d '{"shippingType": "express", "orderId": "ORD-456"}'
 ```
@@ -162,20 +150,16 @@ Expected services:
 | Service | Port | URL | Purpose |
 |---------|------|-----|---------|
 | Temporal | 7233 | gRPC | Temporal server |
-| Temporal UI | 8088 | http://localhost:8088 | View Temporal workflows |
-| Conductor Server | 8081 | http://localhost:8081 | Conductor REST API |
-| Conductor Swagger | 8081 | http://localhost:8081/swagger-ui.html | API documentation |
-| **Conductor UI** | 5001 | http://localhost:5001 | **Full UI with workflow execution** |
-
-> **Note**: The Conductor UI uses the official `conductoross/conductor-standalone` image running in nginx-only mode,
-> proxying API calls to our Temporal-backed Conductor server.
+| Temporal UI | 8233 | http://localhost:8233 | View Temporal workflows |
+| Conductor Server | 8080 | http://localhost:8080 | Conductor REST API |
+| Swagger UI | 8080 | http://localhost:8080/swagger-ui.html | API documentation |
 
 ## Demo 1: Simple Sequential Workflow
 
 ### Step 1: Register Task Definitions
 
 ```bash
-curl -X POST http://localhost:8081/api/metadata/taskdefs \
+curl -X POST http://localhost:8080/api/metadata/taskdefs \
   -H "Content-Type: application/json" \
   -d '[
     {"name": "greet", "timeoutSeconds": 0, "responseTimeoutSeconds": 0},
@@ -187,7 +171,7 @@ curl -X POST http://localhost:8081/api/metadata/taskdefs \
 ### Step 2: Register Workflow Definition
 
 ```bash
-curl -X POST http://localhost:8081/api/metadata/workflow \
+curl -X POST http://localhost:8080/api/metadata/workflow \
   -H "Content-Type: application/json" \
   -d '{
     "name": "greeting_workflow",
@@ -227,7 +211,7 @@ curl -X POST http://localhost:8081/api/metadata/workflow \
 ### Step 3: Start Workflow Execution
 
 ```bash
-curl -X POST http://localhost:8081/api/workflow \
+curl -X POST http://localhost:8080/api/workflow \
   -H "Content-Type: application/json" \
   -d '{
     "name": "greeting_workflow",
@@ -246,13 +230,12 @@ WORKFLOW_ID=<returned-id>
 ### Step 4: Check Workflow Status
 
 ```bash
-curl http://localhost:8081/api/workflow/$WORKFLOW_ID | jq
+curl http://localhost:8080/api/workflow/$WORKFLOW_ID | jq
 ```
 
-### Step 5: View in UIs
+### Step 5: View in Temporal UI
 
-- **Conductor UI**: http://localhost:5001 - See workflow definition and execution
-- **Temporal UI**: http://localhost:8088 - See underlying Temporal workflow execution
+- **Temporal UI**: http://localhost:8233 - See workflow execution, event history, and search attributes
 
 ---
 
@@ -261,7 +244,7 @@ curl http://localhost:8081/api/workflow/$WORKFLOW_ID | jq
 ### Register Workflow with Parallel Tasks
 
 ```bash
-curl -X POST http://localhost:8081/api/metadata/taskdefs \
+curl -X POST http://localhost:8080/api/metadata/taskdefs \
   -H "Content-Type: application/json" \
   -d '[
     {"name": "fetch_user", "timeoutSeconds": 0},
@@ -270,7 +253,7 @@ curl -X POST http://localhost:8081/api/metadata/taskdefs \
     {"name": "aggregate", "timeoutSeconds": 0}
   ]'
 
-curl -X POST http://localhost:8081/api/metadata/workflow \
+curl -X POST http://localhost:8080/api/metadata/workflow \
   -H "Content-Type: application/json" \
   -d '{
     "name": "parallel_fetch_workflow",
@@ -330,7 +313,7 @@ curl -X POST http://localhost:8081/api/metadata/workflow \
 ### Start Parallel Workflow
 
 ```bash
-curl -X POST http://localhost:8081/api/workflow \
+curl -X POST http://localhost:8080/api/workflow \
   -H "Content-Type: application/json" \
   -d '{
     "name": "parallel_fetch_workflow",
@@ -346,7 +329,7 @@ curl -X POST http://localhost:8081/api/workflow \
 ### Register Conditional Workflow
 
 ```bash
-curl -X POST http://localhost:8081/api/metadata/taskdefs \
+curl -X POST http://localhost:8080/api/metadata/taskdefs \
   -H "Content-Type: application/json" \
   -d '[
     {"name": "process_standard", "timeoutSeconds": 0},
@@ -355,7 +338,7 @@ curl -X POST http://localhost:8081/api/metadata/taskdefs \
     {"name": "finalize", "timeoutSeconds": 0}
   ]'
 
-curl -X POST http://localhost:8081/api/metadata/workflow \
+curl -X POST http://localhost:8080/api/metadata/workflow \
   -H "Content-Type: application/json" \
   -d '{
     "name": "order_processing_workflow",
@@ -414,7 +397,7 @@ curl -X POST http://localhost:8081/api/metadata/workflow \
 
 ```bash
 # Express shipping
-curl -X POST http://localhost:8081/api/workflow \
+curl -X POST http://localhost:8080/api/workflow \
   -H "Content-Type: application/json" \
   -d '{
     "name": "order_processing_workflow",
@@ -423,7 +406,7 @@ curl -X POST http://localhost:8081/api/workflow \
   }'
 
 # Premium shipping
-curl -X POST http://localhost:8081/api/workflow \
+curl -X POST http://localhost:8080/api/workflow \
   -H "Content-Type: application/json" \
   -d '{
     "name": "order_processing_workflow",
@@ -439,14 +422,14 @@ curl -X POST http://localhost:8081/api/workflow \
 ### Register Loop Workflow
 
 ```bash
-curl -X POST http://localhost:8081/api/metadata/taskdefs \
+curl -X POST http://localhost:8080/api/metadata/taskdefs \
   -H "Content-Type: application/json" \
   -d '[
     {"name": "process_batch", "timeoutSeconds": 0},
     {"name": "check_more", "timeoutSeconds": 0}
   ]'
 
-curl -X POST http://localhost:8081/api/metadata/workflow \
+curl -X POST http://localhost:8080/api/metadata/workflow \
   -H "Content-Type: application/json" \
   -d '{
     "name": "batch_processing_workflow",
@@ -478,7 +461,7 @@ curl -X POST http://localhost:8081/api/metadata/workflow \
 ### Start Loop Workflow
 
 ```bash
-curl -X POST http://localhost:8081/api/workflow \
+curl -X POST http://localhost:8080/api/workflow \
   -H "Content-Type: application/json" \
   -d '{
     "name": "batch_processing_workflow",
@@ -495,43 +478,43 @@ curl -X POST http://localhost:8081/api/workflow \
 
 ```bash
 # List all workflow definitions
-curl http://localhost:8081/api/metadata/workflow | jq
+curl http://localhost:8080/api/metadata/workflow | jq
 
 # Get specific workflow definition
-curl http://localhost:8081/api/metadata/workflow/greeting_workflow | jq
+curl http://localhost:8080/api/metadata/workflow/greeting_workflow | jq
 
 # List all task definitions
-curl http://localhost:8081/api/metadata/taskdefs | jq
+curl http://localhost:8080/api/metadata/taskdefs | jq
 
 # Delete workflow definition
-curl -X DELETE http://localhost:8081/api/metadata/workflow/greeting_workflow/1
+curl -X DELETE http://localhost:8080/api/metadata/workflow/greeting_workflow/1
 ```
 
 ### Workflow Operations
 
 ```bash
 # Start workflow
-curl -X POST http://localhost:8081/api/workflow \
+curl -X POST http://localhost:8080/api/workflow \
   -H "Content-Type: application/json" \
   -d '{"name": "workflow_name", "version": 1, "input": {}}'
 
 # Get workflow by ID
-curl http://localhost:8081/api/workflow/{workflowId} | jq
+curl http://localhost:8080/api/workflow/{workflowId} | jq
 
 # Get workflow status
-curl http://localhost:8081/api/workflow/{workflowId}/status | jq
+curl http://localhost:8080/api/workflow/{workflowId}/status | jq
 
 # Search workflows
-curl "http://localhost:8081/api/workflow/search?query=status:RUNNING" | jq
+curl "http://localhost:8080/api/workflow/search?query=status:RUNNING" | jq
 
 # Terminate workflow
-curl -X DELETE "http://localhost:8081/api/workflow/{workflowId}?reason=demo"
+curl -X DELETE "http://localhost:8080/api/workflow/{workflowId}?reason=demo"
 
 # Pause workflow
-curl -X PUT http://localhost:8081/api/workflow/{workflowId}/pause
+curl -X PUT http://localhost:8080/api/workflow/{workflowId}/pause
 
 # Resume workflow
-curl -X PUT http://localhost:8081/api/workflow/{workflowId}/resume
+curl -X PUT http://localhost:8080/api/workflow/{workflowId}/resume
 ```
 
 ---
@@ -543,22 +526,13 @@ curl -X PUT http://localhost:8081/api/workflow/{workflowId}/resume
 - No code generation - workflow is interpreted at runtime
 - Temporal provides durability, retries, and observability
 
-### 2. Side-by-Side UI Demo (Open Both!)
+### 2. Swagger UI - Start Workflows (http://localhost:8080/swagger-ui.html)
+- Show workflow and task APIs
+- Register a workflow definition
+- Start a workflow execution
+- Query workflow status
 
-Open **two browser windows side by side**:
-- **Left**: Conductor UI (http://localhost:5001)
-- **Right**: Temporal UI (http://localhost:8233)
-
-### 3. Conductor UI - Start and Monitor (http://localhost:5001)
-- Navigate to **Definitions** → select a workflow → click **Run Workflow**
-- Enter input parameters and execute
-- Go to **Executions** to see the workflow running
-- Click on workflow ID to see:
-  - Task status progression
-  - Input/output for each task
-  - Workflow timeline
-
-### 4. Temporal UI - Execution Details (http://localhost:8233)
+### 3. Temporal UI - Execution Details (http://localhost:8233)
 - See the workflow appear in real-time
 - Click on the workflow to show:
   - **Event History**: Every state transition logged
@@ -567,12 +541,11 @@ Open **two browser windows side by side**:
 - Show **Stack Trace** tab during activity execution
 - Show **Queries** tab to query workflow state
 
-### 5. Key Benefits
+### 4. Key Benefits
 - **Durability**: Temporal's event sourcing survives crashes
 - **Scalability**: Temporal scales to millions of workflows
-- **Observability**: Full execution history in both UIs
+- **Observability**: Full execution history in Temporal UI
 - **Compatibility**: Run existing Conductor workflows unchanged
-- **Dual Visibility**: Monitor from either Conductor or Temporal UI
 
 ---
 

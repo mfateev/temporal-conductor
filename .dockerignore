@@ -1,0 +1,42 @@
+# Git
+.git
+.gitignore
+
+# Build outputs
+build/
+*/build/
+out/
+*/out/
+
+# IDE files
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+
+# Gradle
+.gradle/
+*/.gradle/
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Documentation (not needed in image)
+*.md
+docs/
+design/
+
+# Test files
+**/src/test/
+
+# Local scripts
+scripts/
+
+# Kubernetes manifests
+k8s/
