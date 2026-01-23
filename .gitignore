@@ -1,17 +1,7 @@
-# Git worktrees (reference repos)
-/conductor/
-
 # Build outputs
 **/build/
 **/.gradle/
-*.class
-*.jar
-*.war
-
-# Gradle
-.gradle/
-gradle-app.setting
-!gradle-wrapper.jar
+target/
 
 # IDE
 .idea/
@@ -21,10 +11,16 @@ gradle-app.setting
 .project
 .classpath
 .settings/
+.vscode/
+**/out/
+*/bin/
+/bin/
 
 # OS
 .DS_Store
 Thumbs.db
+.*.swp
+.*.swo
 
 # Logs
 *.log
@@ -32,3 +28,9 @@ Thumbs.db
 # Local configuration
 local.properties
 *.local
+
+# Misc
+/lib/
+dummy
+$buildDir
+src/main/idls/*

@@ -11,17 +11,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build & Test Commands
 
 ```bash
-# Build and test the server (main implementation)
-cd conductor-server-temporal
+# Build and test
 ./gradlew build                    # Full build with tests
-./gradlew test                     # Run all 90 tests
+./gradlew test                     # Run all tests
 ./gradlew test --tests "*WorkflowTest*"   # Pattern matching
 ./gradlew bootRun                  # Run server (requires Temporal)
-
-# Build the core library
-cd conductor-temporal-ext
-./gradlew build
-./gradlew publishToMavenLocal      # Publish for local use
 ```
 
 **Requirements**: JDK 21, Gradle wrapper included
@@ -30,28 +24,32 @@ cd conductor-temporal-ext
 
 ```
 temporal-conductor/
-├── conductor-server-temporal/    # Spring Boot REST server (PRODUCTION)
-├── conductor-temporal-ext/       # Core library (workflows, executors, DAOs)
-├── conductor/                    # Netflix Conductor OSS (git worktree, reference)
-├── design/                       # Design documents
-└── archive/                      # Archived POC modules (reference only)
-    ├── poc-1-decider-isolation/
-    ├── poc-2-determinism-audit/
-    └── poc-3-temporal-integration/
+├── build.gradle              # Root build config
+├── settings.gradle           # Module configuration
+├── temporal-conductor/       # Main module
+│   ├── build.gradle
+│   └── src/
+│       ├── main/java/io/temporal/conductor/
+│       │   ├── workflow/     # Temporal workflow implementations
+│       │   ├── executor/     # DeciderService, SystemTaskExecutor
+│       │   ├── activity/     # Temporal activities
+│       │   ├── api/          # REST endpoints
+│       │   ├── service/      # Service layer
+│       │   ├── config/       # Spring configuration
+│       │   └── dto/          # Data transfer objects
+│       └── test/java/
+└── design/                   # Design documents
 ```
 
 ## Key Files
 
-**Core Library** (conductor-temporal-ext):
-- `src/main/java/io/temporal/conductor/workflow/ConductorWorkflowImpl.java` - Main Temporal workflow
-- `src/main/java/io/temporal/conductor/executor/TemporalDeciderServiceFactory.java` - Factory for DeciderService
-- `src/main/java/io/temporal/conductor/executor/SystemTaskExecutor.java` - FORK, JOIN, SWITCH, DO_WHILE
-- `src/main/java/io/temporal/conductor/executor/InMemory*.java` - In-memory DAO implementations
-
-**REST Server** (conductor-server-temporal):
-- `src/main/java/io/temporal/conductor/api/*Resource.java` - REST endpoints
-- `src/main/java/io/temporal/conductor/service/temporal/*Service.java` - Temporal backend
-- `src/main/java/io/temporal/conductor/config/TemporalConfig.java` - Spring configuration
+- `workflow/ConductorWorkflowImpl.java` - Main Temporal workflow that interprets Conductor definitions
+- `executor/TemporalDeciderServiceFactory.java` - Factory for DeciderService
+- `executor/SystemTaskExecutor.java` - Executes FORK, JOIN, SWITCH, DO_WHILE
+- `executor/InMemory*.java` - In-memory DAO implementations
+- `api/*Resource.java` - REST endpoints
+- `service/temporal/*Service.java` - Temporal backend services
+- `config/TemporalConfig.java` - Spring/Temporal configuration
 
 ## Architecture
 
@@ -83,7 +81,7 @@ temporal-conductor/
 └─────────────────────────────────────────────────┘
 ```
 
-**Task type support**: SIMPLE, HTTP, FORK_JOIN, JOIN, SWITCH/DECISION, DO_WHILE, SET_VARIABLE, TERMINATE all working. SUB_WORKFLOW and WAIT not yet tested.
+**Task type support**: SIMPLE, HTTP, FORK_JOIN, JOIN, SWITCH/DECISION, DO_WHILE, SET_VARIABLE, TERMINATE, WAIT all working.
 
 ## Running Locally
 
@@ -98,11 +96,10 @@ temporal operator search-attribute create --namespace conductor \
   --name ConductorStatus --type Keyword
 
 # Start the server with Temporal profile
-cd conductor-server-temporal
-SPRING_PROFILES_ACTIVE=temporal ./gradlew bootRun
+SPRING_PROFILES_ACTIVE=temporal ./gradlew :temporal-conductor:bootRun
 
 # Or use stub profile for testing without Temporal
-SPRING_PROFILES_ACTIVE=stub ./gradlew bootRun
+SPRING_PROFILES_ACTIVE=stub ./gradlew :temporal-conductor:bootRun
 ```
 
 **Swagger UI**: http://localhost:8080/swagger-ui.html
@@ -130,7 +127,3 @@ See `design/` directory:
 ```bash
 git push origin <branch>
 ```
-
-## Checkpoints
-
-**Do not rely on sprite checkpoints** for preserving work. Git commits pushed to remote are the primary mechanism for durability.
