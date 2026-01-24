@@ -17,8 +17,8 @@ services:
   # Conductor Server (with Temporal backend)
   conductor-server:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: docker/Dockerfile
     container_name: conductor-server
     ports:
       - "8080:8080"   # Conductor REST API
@@ -94,8 +94,8 @@ services:
   # Conductor Server (stub mode - for testing without Temporal)
   conductor-server-stub:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: docker/Dockerfile
     container_name: conductor-server-stub
     ports:
       - "8082:8080"

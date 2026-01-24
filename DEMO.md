@@ -8,10 +8,10 @@ Start all services with a single command:
 
 ```bash
 # Start Temporal + Conductor server
-docker compose up -d
+docker compose -f docker/docker-compose.yml up -d
 
 # Wait for initialization (registers search attributes)
-docker compose logs init-temporal -f
+docker compose -f docker/docker-compose.yml logs init-temporal -f
 
 # Services will be ready at:
 # - Conductor UI:     http://localhost:5001
@@ -23,8 +23,8 @@ docker compose logs init-temporal -f
 ### Stop Services
 
 ```bash
-docker compose down        # Stop services
-docker compose down -v     # Stop and remove volumes (clean state)
+docker compose -f docker/docker-compose.yml down        # Stop services
+docker compose -f docker/docker-compose.yml down -v     # Stop and remove volumes (clean state)
 ```
 
 ---
@@ -144,7 +144,7 @@ curl -X POST "http://localhost:8080/api/workflow/order_processing_workflow" \
 Ensure all services are running:
 
 ```bash
-docker compose ps
+docker compose -f docker/docker-compose.yml ps
 ```
 
 Expected services:
@@ -580,15 +580,15 @@ docker stop conductor-ui && docker rm conductor-ui
 
 ```bash
 # Check service logs
-docker compose logs conductor-server -f
-docker compose logs temporal -f
+docker compose -f docker/docker-compose.yml logs conductor-server -f
+docker compose -f docker/docker-compose.yml logs temporal -f
 
 # Restart services
-docker compose restart conductor-server
+docker compose -f docker/docker-compose.yml restart conductor-server
 
 # Full reset
-docker compose down -v
-docker compose up -d
+docker compose -f docker/docker-compose.yml down -v
+docker compose -f docker/docker-compose.yml up -d
 ```
 
 ## Cleanup (Local Development)
