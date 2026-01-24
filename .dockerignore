@@ -3,40 +3,58 @@
 .gitignore
 
 # Build outputs
+build/
+*/build/
 **/build
+out/
+*/out/
 **/out
 **/target
 **/*.class
 
 # IDE files
-.idea
+.idea/
 *.iml
-.vscode
+.vscode/
 *.swp
+*.swo
 
 # Gradle cache (not wrapper)
-.gradle
+.gradle/
+*/.gradle/
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
 
 # Archive (POC modules)
 archive/
 
-# Documentation
+# Documentation (not needed in image)
 *.md
 !k8s/README.md
-
-# Design docs
+docs/
 design/
 
 # Conductor reference (not needed for build)
 conductor/
 
-# Docker and K8s
+# Docker and K8s (don't need to copy into image)
 Dockerfile
 docker-compose.yml
 k8s/
 
 # Local development
-*.log
 *.tmp
 .env
 .env.local
+
+# Test files (optional - keep for now)
+# **/src/test/
+
+# Local scripts
+scripts/

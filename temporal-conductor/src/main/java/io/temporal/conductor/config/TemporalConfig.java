@@ -45,13 +45,15 @@ public class TemporalConfig {
 
     private static final Logger logger = LoggerFactory.getLogger(TemporalConfig.class);
 
-    @Value("${temporal.service-address:localhost:7233}")
+    // Support standard Temporal env vars (TEMPORAL_ADDRESS, TEMPORAL_NAMESPACE)
+    // with fallback to Spring properties for backward compatibility
+    @Value("${TEMPORAL_ADDRESS:${temporal.service-address:localhost:7234}}")
     private String serviceAddress;
 
-    @Value("${temporal.namespace:conductor}")
+    @Value("${TEMPORAL_NAMESPACE:${temporal.namespace:conductor}}")
     private String namespace;
 
-    @Value("${temporal.task-queue:conductor-workflows}")
+    @Value("${TEMPORAL_TASK_QUEUE:${temporal.task-queue:conductor-workflows}}")
     private String taskQueue;
 
     /**

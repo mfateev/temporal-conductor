@@ -86,14 +86,8 @@ temporal-conductor/
 ## Running Locally
 
 ```bash
-# Start Temporal dev server
-temporal server start-dev --namespace conductor
-
-# Register search attributes (first time only)
-temporal operator search-attribute create --namespace conductor \
-  --name ConductorWorkflowType --type Keyword
-temporal operator search-attribute create --namespace conductor \
-  --name ConductorStatus --type Keyword
+# Start Temporal and register all required search attributes
+./scripts/start-temporal.sh
 
 # Start the server with Temporal profile
 SPRING_PROFILES_ACTIVE=temporal ./gradlew :temporal-conductor:bootRun
@@ -103,6 +97,19 @@ SPRING_PROFILES_ACTIVE=stub ./gradlew :temporal-conductor:bootRun
 ```
 
 **Swagger UI**: http://localhost:8080/swagger-ui.html
+**Temporal UI**: http://localhost:8234
+
+## Environment Variables
+
+The application supports standard Temporal environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TEMPORAL_ADDRESS` | `localhost:7234` | Temporal server gRPC address |
+| `TEMPORAL_NAMESPACE` | `conductor` | Temporal namespace |
+| `TEMPORAL_TASK_QUEUE` | `conductor-workflows` | Worker task queue |
+
+Legacy Spring properties (`temporal.service-address`, etc.) are also supported for backward compatibility.
 
 ## Determinism Requirements
 
