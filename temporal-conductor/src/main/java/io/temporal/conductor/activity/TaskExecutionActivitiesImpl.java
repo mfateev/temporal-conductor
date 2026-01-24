@@ -16,6 +16,9 @@
 
 package io.temporal.conductor.activity;
 
+import io.temporal.activity.Activity;
+import io.temporal.activity.DynamicActivity;
+import io.temporal.common.converter.EncodedValues;
 import io.temporal.conductor.workflow.model.TaskExecutionResult;
 import java.util.Collections;
 import java.util.HashMap;
@@ -24,7 +27,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Implementation of TaskExecutionActivities.
+ * Dynamic Activity implementation for executing Conductor tasks.
+ *
+ * <p>This implements DynamicActivity so that the Temporal activity type
+ * equals the Conductor task name (e.g., "send_email", "process_order").
+ * This provides better visibility in Temporal UI and enables per-task
+ * metrics and configuration.
  *
  * <p>For POC purposes, this provides mock implementations of task execution.
  * In production, this would integrate with:
@@ -34,27 +42,29 @@ import org.slf4j.LoggerFactory;
  *   <li>Other task-specific implementations</li>
  * </ul>
  */
-public class TaskExecutionActivitiesImpl implements TaskExecutionActivities {
+public class TaskExecutionActivitiesImpl implements DynamicActivity {
 
     private static final Logger logger = LoggerFactory.getLogger(TaskExecutionActivitiesImpl.class);
 
     @Override
-    public TaskExecutionResult executeTask(
-            String taskName,
-            String taskRefName,
-            Map<String, Object> input) {
+    public Object execute(EncodedValues args) {
+        // The activity type is the Conductor task name
+        String taskName = Activity.getExecutionContext().getInfo().getActivityType();
+        String taskRefName = args.get(0, String.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> input = args.get(1, Map.class);
 
         logger.info("Executing task: {} (ref: {})", taskName, taskRefName);
         logger.debug("Task input: {}", input);
 
         if (taskName.toLowerCase().contains("http")) {
-            return executeHttpTask(input);
+            return executeHttpTask(taskName, taskRefName, input);
         } else if (taskName.toLowerCase().contains("transform")) {
-            return executeTransformTask(input);
+            return executeTransformTask(taskName, taskRefName, input);
         } else if (taskName.toLowerCase().contains("fail")) {
-            return executeFailingTask(input);
+            return executeFailingTask(taskName, taskRefName, input);
         } else if (taskName.toLowerCase().contains("slow")) {
-            return executeSlowTask(input);
+            return executeSlowTask(taskName, taskRefName, input);
         } else {
             return executeSimpleTask(taskName, taskRefName, input);
         }
@@ -84,7 +94,10 @@ public class TaskExecutionActivitiesImpl implements TaskExecutionActivities {
     }
 
     @SuppressWarnings("unchecked")
-    private TaskExecutionResult executeHttpTask(Map<String, Object> input) {
+    private TaskExecutionResult executeHttpTask(
+            String taskName,
+            String taskRefName,
+            Map<String, Object> input) {
         // Mock HTTP task execution
         String url = "http://example.com";
         if (input != null) {
@@ -123,7 +136,10 @@ public class TaskExecutionActivitiesImpl implements TaskExecutionActivities {
         return TaskExecutionResult.builder().output(output).build();
     }
 
-    private TaskExecutionResult executeTransformTask(Map<String, Object> input) {
+    private TaskExecutionResult executeTransformTask(
+            String taskName,
+            String taskRefName,
+            Map<String, Object> input) {
         // Mock transform task - wrap input in transformed structure
         Map<String, Object> transformed = new HashMap<>();
         transformed.put("original", input != null ? input : Collections.emptyMap());
@@ -134,7 +150,10 @@ public class TaskExecutionActivitiesImpl implements TaskExecutionActivities {
         return TaskExecutionResult.builder().output(transformed).build();
     }
 
-    private TaskExecutionResult executeFailingTask(Map<String, Object> input) {
+    private TaskExecutionResult executeFailingTask(
+            String taskName,
+            String taskRefName,
+            Map<String, Object> input) {
         // Intentionally failing task for testing error handling
         boolean shouldFail = true;
         if (input != null && input.containsKey("shouldFail")) {
@@ -158,7 +177,10 @@ public class TaskExecutionActivitiesImpl implements TaskExecutionActivities {
         }
     }
 
-    private TaskExecutionResult executeSlowTask(Map<String, Object> input) {
+    private TaskExecutionResult executeSlowTask(
+            String taskName,
+            String taskRefName,
+            Map<String, Object> input) {
         // Slow task for testing timeouts
         long delayMs = 1000L;
         if (input != null && input.containsKey("delayMs")) {

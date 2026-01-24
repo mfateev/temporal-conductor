@@ -29,7 +29,7 @@ import com.netflix.conductor.model.TaskModel;
 import com.netflix.conductor.model.WorkflowModel;
 import io.temporal.activity.ActivityOptions;
 import io.temporal.common.RetryOptions;
-import io.temporal.conductor.activity.TaskExecutionActivities;
+import io.temporal.workflow.ActivityStub;
 import io.temporal.conductor.executor.InMemoryMetadataDAO;
 import io.temporal.conductor.executor.SystemTaskExecutor;
 import io.temporal.conductor.executor.TemporalDeciderServiceFactory;
@@ -100,9 +100,8 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
     private volatile boolean isPaused = false;
     private long lastUpdateTime = 0;
 
-    // Activity stub for worker task execution
-    private final TaskExecutionActivities activities = Workflow.newActivityStub(
-            TaskExecutionActivities.class,
+    // Activity stub for worker task execution (untyped for dynamic activity type)
+    private final ActivityStub activities = Workflow.newUntypedActivityStub(
             ActivityOptions.newBuilder()
                     .setStartToCloseTimeout(Duration.ofMinutes(10))
                     .setRetryOptions(
@@ -834,10 +833,11 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
         task.setStatus(TaskModel.Status.IN_PROGRESS);
         task.setStartTime(Workflow.currentTimeMillis());
 
-        // Start activity asynchronously
-        Promise<TaskExecutionResult> promise = Async.function(
-                activities::executeTask,
-                task.getTaskDefName(),
+        // Start activity asynchronously - activity type is the task definition name
+        String activityType = task.getTaskDefName();
+        Promise<TaskExecutionResult> promise = activities.executeAsync(
+                activityType,
+                TaskExecutionResult.class,
                 task.getReferenceTaskName(),
                 task.getInputData() != null ? task.getInputData() : Collections.emptyMap()
         );
@@ -858,8 +858,11 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
         task.setStartTime(Workflow.currentTimeMillis());
 
         try {
-            TaskExecutionResult result = activities.executeTask(
-                    task.getTaskDefName(),
+            // Activity type is the task definition name
+            String activityType = task.getTaskDefName();
+            TaskExecutionResult result = activities.execute(
+                    activityType,
+                    TaskExecutionResult.class,
                     task.getReferenceTaskName(),
                     task.getInputData() != null ? task.getInputData() : Collections.emptyMap()
             );
