@@ -419,4 +419,92 @@ public abstract class AbstractE2ETest {
         }
         return taskDefs;
     }
+
+    /**
+     * Create a workflow definition with a slow task (for pause/resume testing).
+     * The slow task sleeps for the specified duration, keeping the workflow RUNNING.
+     */
+    protected WorkflowDef createSlowWorkflowDef(String workflowName, long delayMs) {
+        WorkflowDef workflowDef = new WorkflowDef();
+        workflowDef.setName(workflowName);
+        workflowDef.setVersion(1);
+
+        WorkflowTask slowTask = new WorkflowTask();
+        slowTask.setName("slow_task");
+        slowTask.setTaskReferenceName("slow_task_ref");
+        slowTask.setType(TaskType.SIMPLE.name());
+        // Set input with delay duration
+        Map<String, Object> inputParams = new HashMap<>();
+        inputParams.put("delayMs", delayMs);
+        slowTask.setInputParameters(inputParams);
+
+        workflowDef.setTasks(Collections.singletonList(slowTask));
+        return workflowDef;
+    }
+
+    // ==================== Workflow Control Methods ====================
+
+    /**
+     * Pause a running workflow via Conductor REST API.
+     */
+    protected void pauseWorkflow(String workflowId) {
+        conductorClient.put()
+                .uri("/api/workflow/{workflowId}/pause", workflowId)
+                .retrieve()
+                .toBodilessEntity()
+                .block(Duration.ofSeconds(10));
+        log.info("Paused workflow: {}", workflowId);
+    }
+
+    /**
+     * Resume a paused workflow via Conductor REST API.
+     */
+    protected void resumeWorkflow(String workflowId) {
+        conductorClient.put()
+                .uri("/api/workflow/{workflowId}/resume", workflowId)
+                .retrieve()
+                .toBodilessEntity()
+                .block(Duration.ofSeconds(10));
+        log.info("Resumed workflow: {}", workflowId);
+    }
+
+    /**
+     * Wait for workflow to reach a specific status.
+     */
+    protected WorkflowStatusResponse waitForWorkflowStatus(String workflowId, String expectedStatus, Duration timeout) {
+        return await()
+                .atMost(timeout)
+                .pollInterval(Duration.ofMillis(500))
+                .until(() -> getWorkflowStatus(workflowId),
+                        status -> expectedStatus.equals(status.getStatus()));
+    }
+
+    /**
+     * Get a search attribute value from Temporal workflow execution.
+     */
+    protected String getSearchAttribute(String workflowId, String attributeName) {
+        var response = workflowServiceStubs.blockingStub()
+                .describeWorkflowExecution(
+                        io.temporal.api.workflowservice.v1.DescribeWorkflowExecutionRequest.newBuilder()
+                                .setNamespace(NAMESPACE)
+                                .setExecution(WorkflowExecution.newBuilder()
+                                        .setWorkflowId(workflowId)
+                                        .build())
+                                .build());
+
+        var searchAttributes = response.getWorkflowExecutionInfo().getSearchAttributes();
+        var indexedFields = searchAttributes.getIndexedFieldsMap();
+
+        if (indexedFields.containsKey(attributeName)) {
+            var payload = indexedFields.get(attributeName);
+            // The value is JSON encoded, extract the string value
+            String data = payload.getData().toStringUtf8();
+            // Remove quotes if present (JSON string encoding)
+            if (data.startsWith("\"") && data.endsWith("\"")) {
+                return data.substring(1, data.length() - 1);
+            }
+            return data;
+        }
+        return null;
+    }
 }
