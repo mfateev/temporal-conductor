@@ -14,6 +14,7 @@ docker compose up -d
 docker compose logs init-temporal -f
 
 # Services will be ready at:
+# - Conductor UI:     http://localhost:5001
 # - Conductor API:    http://localhost:8080
 # - Swagger UI:       http://localhost:8080/swagger-ui.html
 # - Temporal UI:      http://localhost:8233
@@ -149,6 +150,7 @@ docker compose ps
 Expected services:
 | Service | Port | URL | Purpose |
 |---------|------|-----|---------|
+| Conductor UI | 5001 | http://localhost:5001 | Start/monitor workflows |
 | Temporal | 7233 | gRPC | Temporal server |
 | Temporal UI | 8233 | http://localhost:8233 | View Temporal workflows |
 | Conductor Server | 8080 | http://localhost:8080 | Conductor REST API |
@@ -526,13 +528,19 @@ curl -X PUT http://localhost:8080/api/workflow/{workflowId}/resume
 - No code generation - workflow is interpreted at runtime
 - Temporal provides durability, retries, and observability
 
-### 2. Swagger UI - Start Workflows (http://localhost:8080/swagger-ui.html)
+### 2. Conductor UI - Start Workflows (http://localhost:5001)
+- Browse workflow definitions
+- Start a workflow execution
+- Monitor running workflows
+- View workflow execution details
+
+### 3. Swagger UI - Direct API Access (http://localhost:8080/swagger-ui.html)
 - Show workflow and task APIs
 - Register a workflow definition
 - Start a workflow execution
 - Query workflow status
 
-### 3. Temporal UI - Execution Details (http://localhost:8233)
+### 4. Temporal UI - Execution Details (http://localhost:8233)
 - See the workflow appear in real-time
 - Click on the workflow to show:
   - **Event History**: Every state transition logged
@@ -541,7 +549,7 @@ curl -X PUT http://localhost:8080/api/workflow/{workflowId}/resume
 - Show **Stack Trace** tab during activity execution
 - Show **Queries** tab to query workflow state
 
-### 4. Key Benefits
+### 5. Key Benefits
 - **Durability**: Temporal's event sourcing survives crashes
 - **Scalability**: Temporal scales to millions of workflows
 - **Observability**: Full execution history in Temporal UI

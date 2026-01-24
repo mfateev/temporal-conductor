@@ -75,6 +75,22 @@ services:
 
         echo "Search attributes registered successfully!"
 
+  # Conductor UI (using official image with server disabled)
+  conductor-ui:
+    image: conductoross/conductor-standalone:3.15.0
+    container_name: conductor-ui
+    ports:
+      - "5001:5000"
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["nginx -g 'daemon off;'"]
+    volumes:
+      - ./nginx-ui.conf:/etc/nginx/http.d/default.conf:ro
+    depends_on:
+      conductor-server:
+        condition: service_healthy
+    networks:
+      - default
+
   # Conductor Server (stub mode - for testing without Temporal)
   conductor-server-stub:
     build:
