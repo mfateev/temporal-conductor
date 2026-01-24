@@ -17,7 +17,7 @@ docker compose -f docker/docker-compose.yml logs init-temporal -f
 # - Conductor UI:     http://localhost:5001
 # - Conductor API:    http://localhost:8080
 # - Swagger UI:       http://localhost:8080/swagger-ui.html
-# - Temporal UI:      http://localhost:8233
+# - Temporal UI:      http://localhost:8234
 ```
 
 ### Stop Services
@@ -151,8 +151,8 @@ Expected services:
 | Service | Port | URL | Purpose |
 |---------|------|-----|---------|
 | Conductor UI | 5001 | http://localhost:5001 | Start/monitor workflows |
-| Temporal | 7233 | gRPC | Temporal server |
-| Temporal UI | 8233 | http://localhost:8233 | View Temporal workflows |
+| Temporal | 7234 | gRPC | Temporal server |
+| Temporal UI | 8234 | http://localhost:8234 | View Temporal workflows |
 | Conductor Server | 8080 | http://localhost:8080 | Conductor REST API |
 | Swagger UI | 8080 | http://localhost:8080/swagger-ui.html | API documentation |
 

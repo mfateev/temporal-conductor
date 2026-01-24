@@ -4,8 +4,8 @@ services:
     image: temporalio/temporal:latest
     container_name: temporal
     ports:
-      - "7233:7233"   # gRPC frontend
-      - "8233:8233"   # Web UI
+      - "7234:7233"   # gRPC frontend
+      - "8234:8233"   # Web UI
     command: ["server", "start-dev", "--ip", "0.0.0.0"]
     healthcheck:
       test: ["CMD", "temporal", "operator", "cluster", "health"]
@@ -24,7 +24,7 @@ services:
       - "8080:8080"   # Conductor REST API
     environment:
       - SPRING_PROFILES_ACTIVE=temporal
-      - TEMPORAL_SERVICE_ADDRESS=temporal:7233
+      - TEMPORAL_ADDRESS=temporal:7233
       - TEMPORAL_NAMESPACE=conductor
       - JAVA_OPTS=-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0
     depends_on:

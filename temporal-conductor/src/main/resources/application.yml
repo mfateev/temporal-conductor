@@ -97,9 +97,10 @@ management:
         enabled: false
 
 # Temporal configuration (for non-stub mode)
+# Standard Temporal env vars (TEMPORAL_ADDRESS, TEMPORAL_NAMESPACE) take precedence
 temporal:
   namespace: conductor
-  service-address: localhost:7233
+  service-address: localhost:7234
   task-queue: conductor-workflows
 
 # Swagger/OpenAPI

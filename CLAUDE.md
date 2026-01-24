@@ -97,7 +97,19 @@ SPRING_PROFILES_ACTIVE=stub ./gradlew :temporal-conductor:bootRun
 ```
 
 **Swagger UI**: http://localhost:8080/swagger-ui.html
-**Temporal UI**: http://localhost:8233
+**Temporal UI**: http://localhost:8234
+
+## Environment Variables
+
+The application supports standard Temporal environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TEMPORAL_ADDRESS` | `localhost:7234` | Temporal server gRPC address |
+| `TEMPORAL_NAMESPACE` | `conductor` | Temporal namespace |
+| `TEMPORAL_TASK_QUEUE` | `conductor-workflows` | Worker task queue |
+
+Legacy Spring properties (`temporal.service-address`, etc.) are also supported for backward compatibility.
 
 ## Determinism Requirements
 
