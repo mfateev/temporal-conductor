@@ -20,10 +20,10 @@ import com.netflix.conductor.common.metadata.tasks.Task;
 import com.netflix.conductor.common.metadata.tasks.TaskExecLog;
 import com.netflix.conductor.common.metadata.tasks.TaskResult;
 import io.temporal.client.WorkflowClient;
+import io.temporal.client.WorkflowStub;
 import io.temporal.conductor.dto.SearchResult;
 import io.temporal.conductor.dto.TaskSummary;
 import io.temporal.conductor.service.TaskService;
-import io.temporal.conductor.workflow.ConductorWorkflow;
 import io.temporal.conductor.workflow.model.TaskState;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -76,9 +76,8 @@ public class TemporalTaskService implements TaskService {
         }
 
         try {
-            ConductorWorkflow workflowStub = workflowClient.newWorkflowStub(
-                    ConductorWorkflow.class, workflowId);
-            List<TaskState> tasks = workflowStub.getTasks();
+            WorkflowStub workflowStub = workflowClient.newUntypedWorkflowStub(workflowId);
+            List<TaskState> tasks = workflowStub.query("getTasks", List.class);
 
             for (TaskState taskState : tasks) {
                 if (taskId.equals(taskState.getTaskId())) {
@@ -145,13 +144,12 @@ public class TemporalTaskService implements TaskService {
 
         try {
             // Signal the workflow to complete the task
-            ConductorWorkflow workflowStub = workflowClient.newWorkflowStub(
-                    ConductorWorkflow.class, workflowId);
+            WorkflowStub workflowStub = workflowClient.newUntypedWorkflowStub(workflowId);
 
             // Get the reference task name for signaling
             String taskRefName = getTaskRefName(workflowId, taskResult.getTaskId());
             if (taskRefName != null) {
-                workflowStub.completeTask(taskRefName,
+                workflowStub.signal("completeTask", taskRefName,
                         taskResult.getOutputData() != null
                                 ? taskResult.getOutputData() : Collections.emptyMap());
                 logger.info("Task completion signaled: taskRef={}", taskRefName);
@@ -176,9 +174,8 @@ public class TemporalTaskService implements TaskService {
 
     private String getTaskRefName(String workflowId, String taskId) {
         try {
-            ConductorWorkflow workflowStub = workflowClient.newWorkflowStub(
-                    ConductorWorkflow.class, workflowId);
-            List<TaskState> tasks = workflowStub.getTasks();
+            WorkflowStub workflowStub = workflowClient.newUntypedWorkflowStub(workflowId);
+            List<TaskState> tasks = workflowStub.query("getTasks", List.class);
 
             for (TaskState taskState : tasks) {
                 if (taskId.equals(taskState.getTaskId())) {

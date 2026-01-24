@@ -97,7 +97,10 @@ public class TemporalConfig {
     }
 
     /**
-     * Creates and starts a Worker that processes ConductorWorkflow tasks.
+     * Creates and starts a Worker that processes Conductor workflows.
+     *
+     * <p>ConductorWorkflowImpl implements DynamicWorkflow, allowing the Temporal
+     * workflow type to match the Conductor workflow name (e.g., "hello_workflow").
      *
      * @param workerFactory the worker factory
      * @return configured and started Worker
@@ -106,6 +109,7 @@ public class TemporalConfig {
     public Worker conductorWorker(WorkerFactory workerFactory) {
         logger.info("Creating worker for task queue: {}", taskQueue);
         Worker worker = workerFactory.newWorker(taskQueue);
+        // ConductorWorkflowImpl is a DynamicWorkflow - handles any workflow type
         worker.registerWorkflowImplementationTypes(ConductorWorkflowImpl.class,
                 DefinitionWorkflowImpl.class);
         worker.registerActivitiesImplementations(new TaskExecutionActivitiesImpl());

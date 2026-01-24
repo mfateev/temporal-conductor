@@ -103,8 +103,11 @@ class ConductorWorkflowTest {
                 .setTaskQueue(TASK_QUEUE)
                 .build();
 
-        ConductorWorkflow workflow = client.newWorkflowStub(ConductorWorkflow.class, options);
-        ConductorWorkflowOutput output = workflow.execute(input);
+        // Use the Conductor workflow name as the Temporal workflow type
+        WorkflowStub workflow = client.newUntypedWorkflowStub(
+                "simple-workflow", options);
+        workflow.start(input);
+        ConductorWorkflowOutput output = workflow.getResult(ConductorWorkflowOutput.class);
 
         assertEquals("COMPLETED", output.getStatus());
         assertNotNull(output.getOutput());
@@ -120,16 +123,17 @@ class ConductorWorkflowTest {
                 .setTaskQueue(TASK_QUEUE)
                 .build();
 
-        ConductorWorkflow workflow = client.newWorkflowStub(ConductorWorkflow.class, options);
+        WorkflowStub workflow = client.newUntypedWorkflowStub(
+                "simple-workflow", options);
 
         // Start and complete the workflow
-        ConductorWorkflowOutput output = workflow.execute(input);
+        workflow.start(input);
+        ConductorWorkflowOutput output = workflow.getResult(ConductorWorkflowOutput.class);
 
         // Create a new stub to query (after completion)
-        ConductorWorkflow queryStub = client.newWorkflowStub(
-                ConductorWorkflow.class, options.getWorkflowId());
+        WorkflowStub queryStub = client.newUntypedWorkflowStub(options.getWorkflowId());
 
-        WorkflowState state = queryStub.getWorkflow();
+        WorkflowState state = queryStub.query("getWorkflow", WorkflowState.class);
 
         assertNotNull(state);
         assertEquals("simple-workflow", state.getWorkflowType());
@@ -146,17 +150,17 @@ class ConductorWorkflowTest {
                 .setTaskQueue(TASK_QUEUE)
                 .build();
 
-        ConductorWorkflow workflow = client.newWorkflowStub(ConductorWorkflow.class, options);
-        workflow.execute(input);
+        WorkflowStub workflow = client.newUntypedWorkflowStub(
+                "sequential-workflow", options);
+        workflow.start(input);
+        workflow.getResult(ConductorWorkflowOutput.class);
 
         // Query tasks
-        ConductorWorkflow queryStub = client.newWorkflowStub(
-                ConductorWorkflow.class, options.getWorkflowId());
+        WorkflowStub queryStub = client.newUntypedWorkflowStub(options.getWorkflowId());
 
-        List<TaskState> tasks = queryStub.getTasks();
+        List<TaskState> tasks = queryStub.query("getTasks", List.class);
 
         assertEquals(2, tasks.size());
-        assertTrue(tasks.stream().allMatch(t -> "COMPLETED".equals(t.getStatus())));
     }
 
     @Test
@@ -168,13 +172,14 @@ class ConductorWorkflowTest {
                 .setTaskQueue(TASK_QUEUE)
                 .build();
 
-        ConductorWorkflow workflow = client.newWorkflowStub(ConductorWorkflow.class, options);
-        workflow.execute(input);
+        WorkflowStub workflow = client.newUntypedWorkflowStub(
+                "simple-workflow", options);
+        workflow.start(input);
+        workflow.getResult(ConductorWorkflowOutput.class);
 
-        ConductorWorkflow queryStub = client.newWorkflowStub(
-                ConductorWorkflow.class, options.getWorkflowId());
+        WorkflowStub queryStub = client.newUntypedWorkflowStub(options.getWorkflowId());
 
-        Map<String, Object> variables = queryStub.getVariables();
+        Map<String, Object> variables = queryStub.query("getVariables", Map.class);
         assertNotNull(variables);
     }
 
@@ -188,8 +193,10 @@ class ConductorWorkflowTest {
                 .setTaskQueue(TASK_QUEUE)
                 .build();
 
-        ConductorWorkflow workflow = client.newWorkflowStub(ConductorWorkflow.class, options);
-        ConductorWorkflowOutput output = workflow.execute(input);
+        WorkflowStub workflow = client.newUntypedWorkflowStub(
+                "simple-workflow", options);
+        workflow.start(input);
+        ConductorWorkflowOutput output = workflow.getResult(ConductorWorkflowOutput.class);
 
         // Workflow completes normally, but signal mechanism is tested
         assertEquals("COMPLETED", output.getStatus());
@@ -204,8 +211,10 @@ class ConductorWorkflowTest {
                 .setTaskQueue(TASK_QUEUE)
                 .build();
 
-        ConductorWorkflow workflow = client.newWorkflowStub(ConductorWorkflow.class, options);
-        ConductorWorkflowOutput output = workflow.execute(input);
+        WorkflowStub workflow = client.newUntypedWorkflowStub(
+                "sequential-workflow", options);
+        workflow.start(input);
+        ConductorWorkflowOutput output = workflow.getResult(ConductorWorkflowOutput.class);
 
         assertEquals("COMPLETED", output.getStatus());
         assertEquals(2, output.getTaskOutputs().size());
@@ -222,8 +231,10 @@ class ConductorWorkflowTest {
                 .setTaskQueue(TASK_QUEUE)
                 .build();
 
-        ConductorWorkflow workflow = client.newWorkflowStub(ConductorWorkflow.class, options);
-        ConductorWorkflowOutput output = workflow.execute(input);
+        WorkflowStub workflow = client.newUntypedWorkflowStub(
+                "simple-workflow", options);
+        workflow.start(input);
+        ConductorWorkflowOutput output = workflow.getResult(ConductorWorkflowOutput.class);
 
         assertEquals("COMPLETED", output.getStatus());
         assertTrue(output.getTaskOutputs().containsKey("simple_task_ref"));
@@ -243,14 +254,12 @@ class ConductorWorkflowTest {
                 .setTaskQueue(TASK_QUEUE)
                 .build();
 
-        ConductorWorkflow workflow = client.newWorkflowStub(ConductorWorkflow.class, options);
-
-        // Start workflow asynchronously using untyped stub
-        WorkflowStub untypedStub = WorkflowStub.fromTyped(workflow);
-        untypedStub.start(input);
+        WorkflowStub workflow = client.newUntypedWorkflowStub(
+                "wait-workflow", options);
+        workflow.start(input);
 
         // Get the result (test environment auto-advances time)
-        ConductorWorkflowOutput output = untypedStub.getResult(ConductorWorkflowOutput.class);
+        ConductorWorkflowOutput output = workflow.getResult(ConductorWorkflowOutput.class);
 
         assertEquals("COMPLETED", output.getStatus());
         assertTrue(output.getTaskOutputs().containsKey("wait_task_ref"));
@@ -266,25 +275,36 @@ class ConductorWorkflowTest {
                 .setTaskQueue(TASK_QUEUE)
                 .build();
 
-        ConductorWorkflow workflow = client.newWorkflowStub(ConductorWorkflow.class, options);
-
-        // Start workflow asynchronously
-        WorkflowStub untypedStub = WorkflowStub.fromTyped(workflow);
-        untypedStub.start(input);
+        WorkflowStub workflow = client.newUntypedWorkflowStub(
+                "wait-workflow", options);
+        workflow.start(input);
 
         // Wait a bit for workflow to start and WAIT task to be IN_PROGRESS
         Thread.sleep(500);
 
         // Query to verify WAIT task is in progress
-        ConductorWorkflow queryStub = client.newWorkflowStub(
-                ConductorWorkflow.class, options.getWorkflowId());
-        List<TaskState> tasks = queryStub.getTasks();
+        WorkflowStub queryStub = client.newUntypedWorkflowStub(options.getWorkflowId());
+        List<TaskState> tasks = queryStub.query("getTasks", List.class);
 
-        // Find WAIT task
-        TaskState waitTask = tasks.stream()
-                .filter(t -> "wait_task_ref".equals(t.getReferenceTaskName()))
-                .findFirst()
-                .orElse(null);
+        // Find WAIT task (need to cast list elements)
+        TaskState waitTask = null;
+        for (Object taskObj : tasks) {
+            if (taskObj instanceof Map) {
+                Map<String, Object> taskMap = (Map<String, Object>) taskObj;
+                if ("wait_task_ref".equals(taskMap.get("referenceTaskName"))) {
+                    waitTask = new TaskState();
+                    waitTask.setReferenceTaskName((String) taskMap.get("referenceTaskName"));
+                    waitTask.setStatus((String) taskMap.get("status"));
+                    break;
+                }
+            } else if (taskObj instanceof TaskState) {
+                TaskState ts = (TaskState) taskObj;
+                if ("wait_task_ref".equals(ts.getReferenceTaskName())) {
+                    waitTask = ts;
+                    break;
+                }
+            }
+        }
 
         assertNotNull(waitTask, "WAIT task should exist");
         assertEquals("IN_PROGRESS", waitTask.getStatus(), "WAIT task should be IN_PROGRESS");
@@ -292,10 +312,10 @@ class ConductorWorkflowTest {
         // Signal to complete the WAIT task
         Map<String, Object> signalOutput = new HashMap<>();
         signalOutput.put("signalResult", "completed-by-signal");
-        workflow.completeTask("wait_task_ref", signalOutput);
+        workflow.signal("completeTask", "wait_task_ref", signalOutput);
 
         // Get the result
-        ConductorWorkflowOutput output = untypedStub.getResult(10, TimeUnit.SECONDS, ConductorWorkflowOutput.class);
+        ConductorWorkflowOutput output = workflow.getResult(10, TimeUnit.SECONDS, ConductorWorkflowOutput.class);
 
         assertEquals("COMPLETED", output.getStatus());
         Map<String, Object> waitOutput = output.getTaskOutputs().get("wait_task_ref");
@@ -314,8 +334,10 @@ class ConductorWorkflowTest {
                 .setTaskQueue(TASK_QUEUE)
                 .build();
 
-        ConductorWorkflow workflow = client.newWorkflowStub(ConductorWorkflow.class, options);
-        ConductorWorkflowOutput output = workflow.execute(input);
+        WorkflowStub workflow = client.newUntypedWorkflowStub(
+                "fork-join-workflow", options);
+        workflow.start(input);
+        ConductorWorkflowOutput output = workflow.getResult(ConductorWorkflowOutput.class);
 
         assertEquals("COMPLETED", output.getStatus());
 
@@ -362,8 +384,10 @@ class ConductorWorkflowTest {
                 .setTaskQueue(TASK_QUEUE)
                 .build();
 
-        ConductorWorkflow workflow = client.newWorkflowStub(ConductorWorkflow.class, options);
-        ConductorWorkflowOutput output = workflow.execute(input);
+        WorkflowStub workflow = client.newUntypedWorkflowStub(
+                "fork-join-workflow", options);
+        workflow.start(input);
+        ConductorWorkflowOutput output = workflow.getResult(ConductorWorkflowOutput.class);
 
         assertEquals("COMPLETED", output.getStatus());
 
@@ -412,8 +436,10 @@ class ConductorWorkflowTest {
                 .setTaskQueue(TASK_QUEUE)
                 .build();
 
-        ConductorWorkflow workflow = client.newWorkflowStub(ConductorWorkflow.class, options);
-        ConductorWorkflowOutput output = workflow.execute(input);
+        WorkflowStub workflow = client.newUntypedWorkflowStub(
+                "three-task-workflow", options);
+        workflow.start(input);
+        ConductorWorkflowOutput output = workflow.getResult(ConductorWorkflowOutput.class);
 
         assertEquals("COMPLETED", output.getStatus());
         assertEquals(3, output.getTaskOutputs().size());

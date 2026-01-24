@@ -33,12 +33,16 @@ import io.temporal.conductor.activity.TaskExecutionActivities;
 import io.temporal.conductor.executor.InMemoryMetadataDAO;
 import io.temporal.conductor.executor.SystemTaskExecutor;
 import io.temporal.conductor.executor.TemporalDeciderServiceFactory;
+import io.temporal.common.converter.EncodedValues;
 import io.temporal.conductor.workflow.model.ConductorWorkflowInput;
 import io.temporal.conductor.workflow.model.ConductorWorkflowOutput;
 import io.temporal.conductor.workflow.model.TaskExecutionResult;
 import io.temporal.conductor.workflow.model.TaskState;
 import io.temporal.conductor.workflow.model.WorkflowState;
 import io.temporal.workflow.Async;
+import io.temporal.workflow.DynamicQueryHandler;
+import io.temporal.workflow.DynamicSignalHandler;
+import io.temporal.workflow.DynamicWorkflow;
 import io.temporal.workflow.Promise;
 import io.temporal.workflow.Workflow;
 import java.time.Duration;
@@ -54,8 +58,11 @@ import java.util.stream.Collectors;
 import org.slf4j.Logger;
 
 /**
- * Implementation of ConductorWorkflow that runs Conductor's DeciderService
+ * Dynamic workflow implementation that runs Conductor's DeciderService
  * within Temporal's workflow execution model.
+ *
+ * <p>This implements {@link DynamicWorkflow} so that the Temporal workflow type
+ * matches the Conductor workflow name (e.g., "hello_workflow" instead of "ConductorWorkflow").
  *
  * <p>Architecture:
  * <ul>
@@ -67,7 +74,7 @@ import org.slf4j.Logger;
  * <p>This implementation focuses on orchestration, delegating task execution logic
  * to Conductor's components.
  */
-public class ConductorWorkflowImpl implements ConductorWorkflow {
+public class ConductorWorkflowImpl implements DynamicWorkflow {
 
     private static final Logger logger = Workflow.getLogger(ConductorWorkflowImpl.class);
     private static final int MAX_ITERATIONS = 1000;
@@ -107,11 +114,21 @@ public class ConductorWorkflowImpl implements ConductorWorkflow {
     );
 
     @Override
-    public ConductorWorkflowOutput execute(ConductorWorkflowInput input) {
+    public Object execute(EncodedValues args) {
+        // Decode input from EncodedValues
+        ConductorWorkflowInput input = args.get(0, ConductorWorkflowInput.class);
+
         String workflowRunId = Workflow.getInfo().getRunId();
         String workflowId = Workflow.getInfo().getWorkflowId();
+        String workflowType = Workflow.getInfo().getWorkflowType();
 
-        logger.info("Starting Conductor workflow execution, runId: {}", workflowRunId);
+        logger.info("Starting Conductor workflow execution, type: {}, runId: {}", workflowType, workflowRunId);
+
+        // Register dynamic signal handlers
+        registerSignalHandlers();
+
+        // Register dynamic query handlers
+        registerQueryHandlers();
 
         // Initialize Conductor components
         initializeConductorComponents(input, workflowRunId, workflowId);
@@ -899,14 +916,63 @@ public class ConductorWorkflowImpl implements ConductorWorkflow {
         pendingSignals.clear();
     }
 
-    @Override
-    public void completeTask(String taskRefName, Map<String, Object> output) {
+    // ==================== Dynamic Handler Registration ====================
+
+    /**
+     * Register dynamic signal handlers for workflow control operations.
+     */
+    private void registerSignalHandlers() {
+        Workflow.registerListener((DynamicSignalHandler) (signalName, encodedArgs) -> {
+            switch (signalName) {
+                case "completeTask":
+                    String taskRefName = encodedArgs.get(0, String.class);
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> output = encodedArgs.get(1, Map.class);
+                    completeTask(taskRefName, output);
+                    break;
+                case "pause":
+                    pause();
+                    break;
+                case "resume":
+                    resume();
+                    break;
+                case "retryFailedTask":
+                    String retryTaskRef = encodedArgs.get(0, String.class);
+                    retryFailedTask(retryTaskRef);
+                    break;
+                default:
+                    logger.warn("Unknown signal: {}", signalName);
+            }
+        });
+    }
+
+    /**
+     * Register dynamic query handlers for workflow state queries.
+     */
+    private void registerQueryHandlers() {
+        Workflow.registerListener((DynamicQueryHandler) (queryType, encodedArgs) -> {
+            switch (queryType) {
+                case "getWorkflow":
+                    return getWorkflow();
+                case "getTasks":
+                    return getTasks();
+                case "getVariables":
+                    return getVariables();
+                default:
+                    logger.warn("Unknown query: {}", queryType);
+                    return null;
+            }
+        });
+    }
+
+    // ==================== Signal Method Implementations ====================
+
+    private void completeTask(String taskRefName, Map<String, Object> output) {
         logger.info("Received signal to complete task: {}", taskRefName);
         pendingSignals.put(taskRefName, output);
     }
 
-    @Override
-    public void pause() {
+    private void pause() {
         if (workflowModel.getStatus() == WorkflowModel.Status.RUNNING) {
             isPaused = true;
             workflowModel.setStatus(WorkflowModel.Status.PAUSED);
@@ -915,8 +981,7 @@ public class ConductorWorkflowImpl implements ConductorWorkflow {
         }
     }
 
-    @Override
-    public void resume() {
+    private void resume() {
         if (isPaused) {
             isPaused = false;
             workflowModel.setStatus(WorkflowModel.Status.RUNNING);
@@ -925,8 +990,7 @@ public class ConductorWorkflowImpl implements ConductorWorkflow {
         }
     }
 
-    @Override
-    public void retryFailedTask(String taskRefName) {
+    private void retryFailedTask(String taskRefName) {
         Optional<TaskModel> failedTaskOpt = workflowModel.getTasks().stream()
                 .filter(t -> t.getReferenceTaskName().equals(taskRefName))
                 .filter(t -> t.getStatus() == TaskModel.Status.FAILED
@@ -944,8 +1008,9 @@ public class ConductorWorkflowImpl implements ConductorWorkflow {
         });
     }
 
-    @Override
-    public WorkflowState getWorkflow() {
+    // ==================== Query Method Implementations ====================
+
+    private WorkflowState getWorkflow() {
         return WorkflowState.builder()
                 .workflowId(workflowModel.getWorkflowId())
                 .workflowType(workflowModel.getWorkflowName())
@@ -970,15 +1035,13 @@ public class ConductorWorkflowImpl implements ConductorWorkflow {
                 .build();
     }
 
-    @Override
-    public List<TaskState> getTasks() {
+    private List<TaskState> getTasks() {
         return workflowModel.getTasks().stream()
                 .map(this::toTaskState)
                 .collect(Collectors.toList());
     }
 
-    @Override
-    public Map<String, Object> getVariables() {
+    private Map<String, Object> getVariables() {
         return workflowModel.getVariables() != null
                 ? workflowModel.getVariables()
                 : Collections.emptyMap();

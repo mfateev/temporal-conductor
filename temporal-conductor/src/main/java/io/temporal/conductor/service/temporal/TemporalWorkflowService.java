@@ -39,7 +39,6 @@ import io.temporal.conductor.dto.WorkflowStatus;
 import io.temporal.conductor.dto.WorkflowSummary;
 import io.temporal.conductor.service.MetadataService;
 import io.temporal.conductor.service.WorkflowService;
-import io.temporal.conductor.workflow.ConductorWorkflow;
 import io.temporal.conductor.workflow.model.ConductorWorkflowInput;
 import io.temporal.conductor.workflow.model.TaskState;
 import io.temporal.conductor.workflow.model.WorkflowState;
@@ -132,17 +131,18 @@ public class TemporalWorkflowService implements WorkflowService {
                     .createdBy(request.getCreatedBy())
                     .build();
 
-            // Start workflow
+            // Start workflow with Conductor workflow name as the Temporal workflow type
             WorkflowOptions options = WorkflowOptions.newBuilder()
                     .setWorkflowId(workflowId)
                     .setTaskQueue(taskQueue)
                     .build();
 
-            ConductorWorkflow workflow = workflowClient.newWorkflowStub(
-                    ConductorWorkflow.class, options);
-            WorkflowClient.start(workflow::execute, input);
+            // Use untyped stub with Conductor workflow name as the workflow type
+            WorkflowStub workflow = workflowClient.newUntypedWorkflowStub(
+                    workflowDef.getName(), options);
+            workflow.start(input);
 
-            logger.info("Workflow started successfully: {}", workflowId);
+            logger.info("Workflow started successfully: type={}, id={}", workflowDef.getName(), workflowId);
             return workflowId;
 
         } catch (JsonProcessingException e) {
@@ -155,9 +155,8 @@ public class TemporalWorkflowService implements WorkflowService {
         logger.debug("Getting workflow: id={}, includeTasks={}", workflowId, includeTasks);
 
         try {
-            ConductorWorkflow workflowStub = workflowClient.newWorkflowStub(
-                    ConductorWorkflow.class, workflowId);
-            WorkflowState state = workflowStub.getWorkflow();
+            WorkflowStub workflowStub = workflowClient.newUntypedWorkflowStub(workflowId);
+            WorkflowState state = workflowStub.query("getWorkflow", WorkflowState.class);
 
             return convertToWorkflow(workflowId, state, includeTasks);
         } catch (Exception e) {
@@ -172,9 +171,8 @@ public class TemporalWorkflowService implements WorkflowService {
         logger.debug("Getting workflow status: {}", workflowId);
 
         try {
-            ConductorWorkflow workflowStub = workflowClient.newWorkflowStub(
-                    ConductorWorkflow.class, workflowId);
-            WorkflowState state = workflowStub.getWorkflow();
+            WorkflowStub workflowStub = workflowClient.newUntypedWorkflowStub(workflowId);
+            WorkflowState state = workflowStub.query("getWorkflow", WorkflowState.class);
 
             WorkflowStatus status = new WorkflowStatus();
             status.setWorkflowId(workflowId);
@@ -198,17 +196,15 @@ public class TemporalWorkflowService implements WorkflowService {
     @Override
     public void pauseWorkflow(String workflowId) {
         logger.info("Pausing workflow: {}", workflowId);
-        ConductorWorkflow workflowStub = workflowClient.newWorkflowStub(
-                ConductorWorkflow.class, workflowId);
-        workflowStub.pause();
+        WorkflowStub workflowStub = workflowClient.newUntypedWorkflowStub(workflowId);
+        workflowStub.signal("pause");
     }
 
     @Override
     public void resumeWorkflow(String workflowId) {
         logger.info("Resuming workflow: {}", workflowId);
-        ConductorWorkflow workflowStub = workflowClient.newWorkflowStub(
-                ConductorWorkflow.class, workflowId);
-        workflowStub.resume();
+        WorkflowStub workflowStub = workflowClient.newUntypedWorkflowStub(workflowId);
+        workflowStub.signal("resume");
     }
 
     @Override
@@ -247,7 +243,7 @@ public class TemporalWorkflowService implements WorkflowService {
             queryBuilder.append("ExecutionStatus = 'Running'");
 
             if (name != null && !name.isEmpty()) {
-                queryBuilder.append(" AND ConductorWorkflowType = '").append(name).append("'");
+                queryBuilder.append(" AND WorkflowType = '").append(name).append("'");
             }
 
             ListWorkflowExecutionsRequest request = ListWorkflowExecutionsRequest.newBuilder()
@@ -343,8 +339,10 @@ public class TemporalWorkflowService implements WorkflowService {
     }
 
     private String buildTemporalQuery(String conductorQuery, String freeText) {
-        // Default query: all ConductorWorkflow executions
-        StringBuilder queryBuilder = new StringBuilder("WorkflowType = 'ConductorWorkflow'");
+        // With dynamic workflows, WorkflowType equals the Conductor workflow name
+        // No default filter needed - return all workflows unless filtered
+        StringBuilder queryBuilder = new StringBuilder();
+        boolean hasClause = false;
 
         if (conductorQuery != null && !conductorQuery.isEmpty() && !conductorQuery.equals("*")) {
             // Parse Conductor query format: field:value AND field:value
@@ -356,21 +354,29 @@ public class TemporalWorkflowService implements WorkflowService {
                     String key = keyValue[0].trim();
                     String value = keyValue[1].trim();
 
+                    if (hasClause) {
+                        queryBuilder.append(" AND ");
+                    }
+                    hasClause = true;
+
                     // Map Conductor fields to Temporal search attributes
                     switch (key.toLowerCase()) {
                         case "status":
-                            queryBuilder.append(" AND ConductorStatus = '").append(value).append("'");
+                            queryBuilder.append("ConductorStatus = '").append(value).append("'");
                             break;
                         case "workflowtype":
-                            queryBuilder.append(" AND ConductorWorkflowType = '").append(value).append("'");
+                            // WorkflowType now equals the Conductor workflow name
+                            queryBuilder.append("WorkflowType = '").append(value).append("'");
                             break;
                         case "workflowid":
-                            queryBuilder.append(" AND WorkflowId = '").append(value).append("'");
+                            queryBuilder.append("WorkflowId = '").append(value).append("'");
                             break;
                         default:
                             // Try to use as-is if it looks like a Temporal search attribute
                             if (key.startsWith("Conductor") || key.equals("WorkflowId") || key.equals("ExecutionStatus")) {
-                                queryBuilder.append(" AND ").append(key).append(" = '").append(value).append("'");
+                                queryBuilder.append(key).append(" = '").append(value).append("'");
+                            } else {
+                                hasClause = false; // Don't count unknown fields
                             }
                             break;
                     }
@@ -378,29 +384,17 @@ public class TemporalWorkflowService implements WorkflowService {
             }
         }
 
-        logger.debug("Built Temporal query: {}", queryBuilder);
-        return queryBuilder.toString();
+        String query = queryBuilder.length() > 0 ? queryBuilder.toString() : "";
+        logger.debug("Built Temporal query: {}", query);
+        return query;
     }
 
     private WorkflowSummary convertToWorkflowSummary(WorkflowExecutionInfo info) {
         WorkflowSummary summary = new WorkflowSummary();
         summary.setWorkflowId(info.getExecution().getWorkflowId());
 
-        // Extract ConductorWorkflowType from search attributes if available
-        if (info.hasSearchAttributes() &&
-            info.getSearchAttributes().getIndexedFieldsMap().containsKey("ConductorWorkflowType")) {
-            try {
-                String typeJson = info.getSearchAttributes()
-                        .getIndexedFieldsMap().get("ConductorWorkflowType")
-                        .getData().toStringUtf8();
-                // Remove quotes from JSON string
-                summary.setWorkflowType(typeJson.replace("\"", ""));
-            } catch (Exception e) {
-                summary.setWorkflowType("ConductorWorkflow");
-            }
-        } else {
-            summary.setWorkflowType("ConductorWorkflow");
-        }
+        // With dynamic workflows, WorkflowType equals the Conductor workflow name
+        summary.setWorkflowType(info.getType().getName());
 
         // Map Temporal status to Conductor status
         summary.setStatus(mapTemporalStatusToConductor(info.getStatus()));
