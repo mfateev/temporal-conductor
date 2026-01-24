@@ -16,6 +16,26 @@ repositories {
     mavenCentral()
 }
 
+// Define E2E test source set
+sourceSets {
+    e2eTest {
+        java {
+            srcDir 'src/e2eTest/java'
+        }
+        resources {
+            srcDir 'src/e2eTest/resources'
+        }
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += sourceSets.main.output
+    }
+}
+
+// E2E test configuration extends test configuration
+configurations {
+    e2eTestImplementation.extendsFrom testImplementation
+    e2eTestRuntimeOnly.extendsFrom testRuntimeOnly
+}
+
 dependencies {
     // Conductor dependencies
     implementation 'org.conductoross:conductor-core:3.21.23'
@@ -48,8 +68,42 @@ dependencies {
     testImplementation 'org.mockito:mockito-core:5.8.0'
     testImplementation 'ch.qos.logback:logback-classic:1.4.14'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+    // E2E Testing - Testcontainers
+    e2eTestImplementation platform('org.testcontainers:testcontainers-bom:1.21.0')
+    e2eTestImplementation 'org.testcontainers:testcontainers'
+    e2eTestImplementation 'org.testcontainers:junit-jupiter'
+
+    // E2E Testing - HTTP client and utilities
+    e2eTestImplementation 'org.springframework.boot:spring-boot-starter-webflux'
+    e2eTestImplementation 'org.awaitility:awaitility:4.2.0'
 }
 
 test {
     useJUnitPlatform()
+}
+
+// Handle duplicate resources in e2eTest
+processE2eTestResources {
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+// E2E test task
+task e2eTest(type: Test) {
+    description = 'Runs E2E tests against Docker Compose stack'
+    group = 'verification'
+
+    testClassesDirs = sourceSets.e2eTest.output.classesDirs
+    classpath = sourceSets.e2eTest.runtimeClasspath
+
+    useJUnitPlatform()
+
+    // E2E tests may take longer
+    systemProperty 'junit.jupiter.execution.timeout.default', '5m'
+
+    testLogging {
+        events 'passed', 'skipped', 'failed'
+        showStandardStreams = true
+        exceptionFormat = 'full'
+    }
 }
