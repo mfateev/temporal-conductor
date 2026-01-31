@@ -55,7 +55,7 @@ class ActivityTypeE2ETest extends AbstractE2ETest {
         String workflowId = startWorkflow(workflowName, 1, Collections.emptyMap());
 
         // Wait for completion
-        WorkflowStatusResponse status = waitForWorkflowCompletion(workflowId, Duration.ofMinutes(1));
+        WorkflowStatusResponse status = waitForWorkflowCompletion(workflowId, Duration.ofSeconds(30));
         assertEquals("COMPLETED", status.getStatus());
 
         // Get activity types from Temporal history
@@ -84,7 +84,7 @@ class ActivityTypeE2ETest extends AbstractE2ETest {
         String workflowId = startWorkflow(workflowName, 1, Collections.emptyMap());
 
         // Wait for completion
-        WorkflowStatusResponse status = waitForWorkflowCompletion(workflowId, Duration.ofMinutes(1));
+        WorkflowStatusResponse status = waitForWorkflowCompletion(workflowId, Duration.ofSeconds(30));
         assertEquals("COMPLETED", status.getStatus());
 
         // Get activity types from Temporal history
@@ -117,7 +117,7 @@ class ActivityTypeE2ETest extends AbstractE2ETest {
         String workflowId = startWorkflow(workflowName, 1, Collections.emptyMap());
 
         // Wait for completion
-        WorkflowStatusResponse status = waitForWorkflowCompletion(workflowId, Duration.ofMinutes(1));
+        WorkflowStatusResponse status = waitForWorkflowCompletion(workflowId, Duration.ofSeconds(30));
         assertEquals("COMPLETED", status.getStatus());
 
         // Get activity types

@@ -60,7 +60,7 @@ class WorkflowTypeE2ETest extends AbstractE2ETest {
         String workflowId = startWorkflow(workflowName, 1, input);
 
         // Wait for completion
-        WorkflowStatusResponse status = waitForWorkflowCompletion(workflowId, Duration.ofMinutes(1));
+        WorkflowStatusResponse status = waitForWorkflowCompletion(workflowId, Duration.ofSeconds(30));
         assertEquals("COMPLETED", status.getStatus());
 
         // Get the Temporal workflow type from history
@@ -89,7 +89,7 @@ class WorkflowTypeE2ETest extends AbstractE2ETest {
         String workflowId = startWorkflow(workflowName, 1, Collections.emptyMap());
 
         // Wait for completion
-        WorkflowStatusResponse status = waitForWorkflowCompletion(workflowId, Duration.ofMinutes(1));
+        WorkflowStatusResponse status = waitForWorkflowCompletion(workflowId, Duration.ofSeconds(30));
         assertEquals("COMPLETED", status.getStatus());
 
         // Verify Temporal workflow type
@@ -118,8 +118,8 @@ class WorkflowTypeE2ETest extends AbstractE2ETest {
         String workflowId2 = startWorkflow(workflow2Name, 1, Collections.emptyMap());
 
         // Wait for completion
-        waitForWorkflowCompletion(workflowId1, Duration.ofMinutes(1));
-        waitForWorkflowCompletion(workflowId2, Duration.ofMinutes(1));
+        waitForWorkflowCompletion(workflowId1, Duration.ofSeconds(30));
+        waitForWorkflowCompletion(workflowId2, Duration.ofSeconds(30));
 
         // Verify each workflow has its own type
         String type1 = getWorkflowTypeFromHistory(workflowId1);

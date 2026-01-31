@@ -56,7 +56,7 @@ class ForkJoinE2ETest extends AbstractE2ETest {
         String workflowId = startWorkflow(workflowName, 1, Collections.emptyMap());
 
         // Wait for completion
-        WorkflowStatusResponse status = waitForWorkflowCompletion(workflowId, Duration.ofMinutes(1));
+        WorkflowStatusResponse status = waitForWorkflowCompletion(workflowId, Duration.ofSeconds(30));
         assertEquals("COMPLETED", status.getStatus());
 
         // Verify all tasks completed
@@ -99,7 +99,7 @@ class ForkJoinE2ETest extends AbstractE2ETest {
         String workflowId = startWorkflow(workflowName, 1, Collections.emptyMap());
 
         // Wait for completion
-        WorkflowStatusResponse status = waitForWorkflowCompletion(workflowId, Duration.ofMinutes(1));
+        WorkflowStatusResponse status = waitForWorkflowCompletion(workflowId, Duration.ofSeconds(30));
         assertEquals("COMPLETED", status.getStatus());
 
         // Verify parallel scheduling by checking consecutive ActivityTaskScheduled events
@@ -132,7 +132,7 @@ class ForkJoinE2ETest extends AbstractE2ETest {
         String workflowId = startWorkflow(workflowName, 1, Collections.emptyMap());
 
         // Wait for completion
-        waitForWorkflowCompletion(workflowId, Duration.ofMinutes(1));
+        waitForWorkflowCompletion(workflowId, Duration.ofSeconds(30));
 
         // Get activity types from Temporal history
         List<String> activityTypes = getActivityTypesFromHistory(workflowId);
@@ -170,7 +170,7 @@ class ForkJoinE2ETest extends AbstractE2ETest {
         String workflowId = startWorkflow(workflowName, 1, Collections.emptyMap());
 
         // Wait for completion
-        WorkflowStatusResponse status = waitForWorkflowCompletion(workflowId, Duration.ofMinutes(2));
+        WorkflowStatusResponse status = waitForWorkflowCompletion(workflowId, Duration.ofSeconds(60));
         assertEquals("COMPLETED", status.getStatus());
 
         // Verify parallel scheduling

@@ -33,21 +33,17 @@ import io.temporal.client.WorkflowClientOptions;
 import io.temporal.conductor.e2e.dto.WorkflowStatusResponse;
 import io.temporal.serviceclient.WorkflowServiceStubs;
 import io.temporal.serviceclient.WorkflowServiceStubsOptions;
-import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Timeout;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
-import org.springframework.http.client.reactive.ReactorClientHttpConnector;
-import org.springframework.web.reactive.function.client.ExchangeStrategies;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.testcontainers.containers.ComposeContainer;
-import org.testcontainers.containers.wait.strategy.Wait;
-import reactor.core.publisher.Mono;
 
-import java.io.File;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.concurrent.TimeUnit;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -58,16 +54,17 @@ import static org.awaitility.Awaitility.await;
 /**
  * Base class for E2E tests providing Docker Compose lifecycle management,
  * Temporal WorkflowClient, and Conductor REST API WebClient.
+ *
+ * <p>Uses singleton container pattern - containers are started once and reused
+ * across all test classes for faster test execution.
+ *
+ * <p>All tests inherit a 90-second timeout - tests should fail fast rather than hang.
  */
+@Timeout(value = 90, unit = TimeUnit.SECONDS)
 public abstract class AbstractE2ETest {
 
     private static final Logger log = LoggerFactory.getLogger(AbstractE2ETest.class);
     protected static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
-
-    protected static final String TEMPORAL_SERVICE = "temporal";
-    protected static final int TEMPORAL_PORT = 7233;
-    protected static final String CONDUCTOR_SERVICE = "conductor-server";
-    protected static final int CONDUCTOR_PORT = 8080;
     protected static final String NAMESPACE = "conductor";
 
     protected static ComposeContainer composeContainer;
@@ -76,87 +73,15 @@ public abstract class AbstractE2ETest {
     protected static WebClient conductorClient;
 
     @BeforeAll
-    static void startContainers() {
-        File composeFile = new File("src/e2eTest/resources/docker-compose-e2e.yml");
-        if (!composeFile.exists()) {
-            throw new IllegalStateException("docker-compose-e2e.yml not found at: " + composeFile.getAbsolutePath());
-        }
-
-        log.info("Starting Docker Compose stack from: {}", composeFile.getAbsolutePath());
-
-        composeContainer = new ComposeContainer(composeFile)
-                .withExposedService(TEMPORAL_SERVICE, TEMPORAL_PORT,
-                        Wait.forHealthcheck().withStartupTimeout(Duration.ofMinutes(2)))
-                .withExposedService(CONDUCTOR_SERVICE, CONDUCTOR_PORT,
-                        Wait.forHealthcheck().withStartupTimeout(Duration.ofMinutes(3)))
-                .withLocalCompose(true);
-
-        composeContainer.start();
-
-        // Get mapped ports
-        String temporalHost = composeContainer.getServiceHost(TEMPORAL_SERVICE, TEMPORAL_PORT);
-        int temporalPort = composeContainer.getServicePort(TEMPORAL_SERVICE, TEMPORAL_PORT);
-        String temporalAddress = temporalHost + ":" + temporalPort;
-
-        String conductorHost = composeContainer.getServiceHost(CONDUCTOR_SERVICE, CONDUCTOR_PORT);
-        int conductorPort = composeContainer.getServicePort(CONDUCTOR_SERVICE, CONDUCTOR_PORT);
-        String conductorBaseUrl = "http://" + conductorHost + ":" + conductorPort;
-
-        log.info("Temporal server available at: {}", temporalAddress);
-        log.info("Conductor server available at: {}", conductorBaseUrl);
-
-        // Initialize Temporal client
-        workflowServiceStubs = WorkflowServiceStubs.newServiceStubs(
-                WorkflowServiceStubsOptions.newBuilder()
-                        .setTarget(temporalAddress)
-                        .build());
-
-        workflowClient = WorkflowClient.newInstance(
-                workflowServiceStubs,
-                WorkflowClientOptions.newBuilder()
-                        .setNamespace(NAMESPACE)
-                        .build());
-
-        // Initialize Conductor REST client with increased buffer size for large workflow responses
-        int bufferSize = 16 * 1024 * 1024; // 16MB buffer for workflows with many tasks
-        ExchangeStrategies strategies = ExchangeStrategies.builder()
-                .codecs(codecs -> codecs.defaultCodecs().maxInMemorySize(bufferSize))
-                .build();
-
-        conductorClient = WebClient.builder()
-                .baseUrl(conductorBaseUrl)
-                .defaultHeader("Content-Type", MediaType.APPLICATION_JSON_VALUE)
-                .exchangeStrategies(strategies)
-                .build();
-
-        // Wait for Conductor to be fully ready
-        await().atMost(Duration.ofMinutes(2))
-                .pollInterval(Duration.ofSeconds(2))
-                .until(() -> {
-                    try {
-                        String health = conductorClient.get()
-                                .uri("/actuator/health/readiness")
-                                .retrieve()
-                                .bodyToMono(String.class)
-                                .block(Duration.ofSeconds(5));
-                        return health != null && health.contains("UP");
-                    } catch (Exception e) {
-                        log.debug("Waiting for Conductor readiness: {}", e.getMessage());
-                        return false;
-                    }
-                });
-
-        log.info("Docker Compose stack is ready");
-    }
-
-    @AfterAll
-    static void stopContainers() {
-        if (workflowServiceStubs != null) {
-            workflowServiceStubs.shutdown();
-        }
-        if (composeContainer != null) {
-            composeContainer.stop();
-        }
+    @Timeout(value = 3, unit = TimeUnit.MINUTES)  // Container startup (image should be pre-built by Gradle)
+    static void initializeSharedContainers() {
+        // Use singleton pattern - containers are started once and reused across all test classes
+        SharedE2EContainers shared = SharedE2EContainers.getInstance();
+        composeContainer = shared.getComposeContainer();
+        workflowServiceStubs = shared.getWorkflowServiceStubs();
+        workflowClient = shared.getWorkflowClient();
+        conductorClient = shared.getConductorClient();
+        log.info("Using shared E2E containers");
     }
 
     // ==================== Helper Methods ====================
@@ -303,12 +228,16 @@ public abstract class AbstractE2ETest {
     }
 
     /**
-     * Extract all activity types from workflow history.
+     * Extract all activity types from workflow history across all continue-as-new runs.
+     * This traverses the full chain of workflow executions to count total activities.
      */
     protected List<String> getActivityTypesFromHistory(String workflowId) {
         List<String> activityTypes = new ArrayList<>();
-        List<HistoryEvent> events = getWorkflowHistory(workflowId);
-        for (HistoryEvent event : events) {
+
+        // Get all events from all runs by traversing continue-as-new chain
+        List<HistoryEvent> allEvents = getWorkflowHistoryAllRuns(workflowId);
+
+        for (HistoryEvent event : allEvents) {
             if (event.getEventType() == EventType.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED) {
                 String activityType = event.getActivityTaskScheduledEventAttributes()
                         .getActivityType()
@@ -320,9 +249,91 @@ public abstract class AbstractE2ETest {
     }
 
     /**
+     * Get workflow history for all runs, traversing continue-as-new chain backward
+     * from the latest run to the first run, then concatenating in chronological order.
+     */
+    protected List<HistoryEvent> getWorkflowHistoryAllRuns(String workflowId) {
+        List<List<HistoryEvent>> allRunHistories = new ArrayList<>();
+        String currentRunId = null; // null means latest run
+
+        // Traverse backward from latest run to first run
+        while (true) {
+            List<HistoryEvent> runHistory = getWorkflowHistoryForRun(workflowId, currentRunId);
+            allRunHistories.add(0, runHistory); // Prepend to maintain chronological order
+
+            // Check if this run was continued from a previous run
+            String previousRunId = null;
+            for (HistoryEvent event : runHistory) {
+                if (event.getEventType() == EventType.EVENT_TYPE_WORKFLOW_EXECUTION_STARTED) {
+                    var attrs = event.getWorkflowExecutionStartedEventAttributes();
+                    if (!attrs.getContinuedExecutionRunId().isEmpty()) {
+                        previousRunId = attrs.getContinuedExecutionRunId();
+                    }
+                    break;
+                }
+            }
+
+            if (previousRunId == null || previousRunId.isEmpty()) {
+                // This is the first run, we're done
+                break;
+            }
+
+            currentRunId = previousRunId;
+        }
+
+        // Concatenate all histories in chronological order
+        List<HistoryEvent> allEvents = new ArrayList<>();
+        for (List<HistoryEvent> runHistory : allRunHistories) {
+            allEvents.addAll(runHistory);
+        }
+
+        log.debug("Retrieved history from {} continue-as-new runs, total {} events",
+                allRunHistories.size(), allEvents.size());
+
+        return allEvents;
+    }
+
+    /**
+     * Get workflow history for a specific run.
+     * @param workflowId the workflow ID
+     * @param runId the run ID, or null for the latest run
+     */
+    protected List<HistoryEvent> getWorkflowHistoryForRun(String workflowId, String runId) {
+        List<HistoryEvent> allEvents = new ArrayList<>();
+        com.google.protobuf.ByteString nextPageToken = com.google.protobuf.ByteString.EMPTY;
+
+        do {
+            WorkflowExecution.Builder executionBuilder = WorkflowExecution.newBuilder()
+                    .setWorkflowId(workflowId);
+            if (runId != null && !runId.isEmpty()) {
+                executionBuilder.setRunId(runId);
+            }
+
+            GetWorkflowExecutionHistoryRequest.Builder requestBuilder =
+                    GetWorkflowExecutionHistoryRequest.newBuilder()
+                            .setNamespace(NAMESPACE)
+                            .setExecution(executionBuilder.build());
+
+            if (!nextPageToken.isEmpty()) {
+                requestBuilder.setNextPageToken(nextPageToken);
+            }
+
+            GetWorkflowExecutionHistoryResponse response = workflowServiceStubs.blockingStub()
+                    .getWorkflowExecutionHistory(requestBuilder.build());
+
+            allEvents.addAll(response.getHistory().getEventsList());
+            nextPageToken = response.getNextPageToken();
+        } while (!nextPageToken.isEmpty());
+
+        return allEvents;
+    }
+
+    /**
      * Count consecutive activity scheduled events (for parallel verification).
+     * Only looks at single run history since consecutive events are measured within a run.
      */
     protected int getMaxConsecutiveActivityScheduledEvents(String workflowId) {
+        // For consecutive events, we only look at single run since they wouldn't be consecutive across runs
         List<HistoryEvent> events = getWorkflowHistory(workflowId);
         int maxConsecutive = 0;
         int currentConsecutive = 0;

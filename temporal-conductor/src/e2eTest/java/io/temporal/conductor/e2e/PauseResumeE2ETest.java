@@ -82,7 +82,7 @@ class PauseResumeE2ETest extends AbstractE2ETest {
         log.info("Workflow is RUNNING again after resume");
 
         // Wait for workflow completion (the slow task will finish)
-        status = waitForWorkflowCompletion(workflowId, Duration.ofMinutes(1));
+        status = waitForWorkflowCompletion(workflowId, Duration.ofSeconds(30));
         assertEquals("COMPLETED", status.getStatus());
         log.info("Workflow COMPLETED successfully after pause/resume cycle");
     }
@@ -125,7 +125,7 @@ class PauseResumeE2ETest extends AbstractE2ETest {
 
         // Resume and wait for completion
         resumeWorkflow(workflowId);
-        waitForWorkflowCompletion(workflowId, Duration.ofMinutes(1));
+        waitForWorkflowCompletion(workflowId, Duration.ofSeconds(30));
 
         // Verify final ConductorStatus is COMPLETED
         conductorStatus = getSearchAttribute(workflowId, "ConductorStatus");
@@ -164,7 +164,7 @@ class PauseResumeE2ETest extends AbstractE2ETest {
         }
 
         // Wait for workflow completion
-        WorkflowStatusResponse status = waitForWorkflowCompletion(workflowId, Duration.ofMinutes(1));
+        WorkflowStatusResponse status = waitForWorkflowCompletion(workflowId, Duration.ofSeconds(30));
         assertEquals("COMPLETED", status.getStatus());
         log.info("Workflow COMPLETED after {} pause/resume cycles", 3);
     }
@@ -183,7 +183,7 @@ class PauseResumeE2ETest extends AbstractE2ETest {
 
         // Start workflow and wait for completion
         String workflowId = startWorkflow(workflowName, 1, Collections.emptyMap());
-        WorkflowStatusResponse status = waitForWorkflowCompletion(workflowId, Duration.ofMinutes(1));
+        WorkflowStatusResponse status = waitForWorkflowCompletion(workflowId, Duration.ofSeconds(30));
         assertEquals("COMPLETED", status.getStatus());
         log.info("Workflow COMPLETED");
 

@@ -64,7 +64,7 @@ class RestApiE2ETest extends AbstractE2ETest {
         assertEquals(workflowName, status.getWorkflowType());
 
         // Wait for completion
-        status = waitForWorkflowCompletion(workflowId, Duration.ofMinutes(1));
+        status = waitForWorkflowCompletion(workflowId, Duration.ofSeconds(30));
         assertEquals("COMPLETED", status.getStatus());
         assertNotNull(status.getStartTime());
         assertNotNull(status.getEndTime());
@@ -83,7 +83,7 @@ class RestApiE2ETest extends AbstractE2ETest {
         String workflowId = startWorkflow(workflowName, 1, Collections.emptyMap());
 
         // Wait for completion and verify tasks
-        WorkflowStatusResponse status = waitForWorkflowCompletion(workflowId, Duration.ofMinutes(1));
+        WorkflowStatusResponse status = waitForWorkflowCompletion(workflowId, Duration.ofSeconds(30));
 
         assertEquals("COMPLETED", status.getStatus());
         assertNotNull(status.getTasks());
@@ -125,7 +125,7 @@ class RestApiE2ETest extends AbstractE2ETest {
         workflowId = workflowId != null ? workflowId.replace("\"", "") : null;
 
         // Wait for completion
-        WorkflowStatusResponse status = waitForWorkflowCompletion(workflowId, Duration.ofMinutes(1));
+        WorkflowStatusResponse status = waitForWorkflowCompletion(workflowId, Duration.ofSeconds(30));
 
         assertEquals("COMPLETED", status.getStatus());
         assertEquals(correlationId, status.getCorrelationId());
@@ -180,7 +180,7 @@ class RestApiE2ETest extends AbstractE2ETest {
         workflowId = workflowId != null ? workflowId.replace("\"", "") : null;
 
         // Wait for completion
-        waitForWorkflowCompletion(workflowId, Duration.ofMinutes(1));
+        waitForWorkflowCompletion(workflowId, Duration.ofSeconds(30));
 
         // Search for workflow by workflow type
         String searchQuery = "workflowType=" + workflowName;
@@ -233,7 +233,7 @@ class RestApiE2ETest extends AbstractE2ETest {
         String workflowId = startWorkflow(workflowName, 1, input);
 
         // Wait for completion
-        WorkflowStatusResponse status = waitForWorkflowCompletion(workflowId, Duration.ofMinutes(1));
+        WorkflowStatusResponse status = waitForWorkflowCompletion(workflowId, Duration.ofSeconds(30));
         assertEquals("COMPLETED", status.getStatus());
 
         // Verify input was stored correctly

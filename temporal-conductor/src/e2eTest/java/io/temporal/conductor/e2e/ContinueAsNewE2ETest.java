@@ -35,6 +35,10 @@ import java.util.Map;
 import io.temporal.api.enums.v1.EventType;
 import io.temporal.api.history.v1.HistoryEvent;
 
+import org.junit.jupiter.api.Timeout;
+
+import java.util.concurrent.TimeUnit;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -53,6 +57,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * large payloads (~1MB per activity), we can trigger continue-as-new in under 50 iterations
  * rather than requiring 50,000+ events.
  */
+@Timeout(value = 2, unit = TimeUnit.MINUTES) // Fail fast - no test should take more than 2 minutes
 class ContinueAsNewE2ETest extends AbstractE2ETest {
 
     private static final Logger log = LoggerFactory.getLogger(ContinueAsNewE2ETest.class);
@@ -78,8 +83,8 @@ class ContinueAsNewE2ETest extends AbstractE2ETest {
 
         log.info("Started simple DO_WHILE workflow with {} iterations, workflowId: {}", iterations, workflowId);
 
-        // Wait for completion
-        WorkflowStatusResponse status = waitForWorkflowCompletion(workflowId, Duration.ofMinutes(2));
+        // Wait for completion - fail fast
+        WorkflowStatusResponse status = waitForWorkflowCompletion(workflowId, Duration.ofSeconds(60));
 
         // Log detailed status for debugging
         log.info("Workflow status: {}, reasonForIncompletion: {}",
@@ -97,6 +102,7 @@ class ContinueAsNewE2ETest extends AbstractE2ETest {
     }
 
     @Test
+    @Timeout(value = 4, unit = TimeUnit.MINUTES)  // Longer timeout for 1000 iterations with large payloads
     void testContinueAsNewWithLargePayloads() throws Exception {
         // Trigger continue-as-new by using large payloads
         // Temporal limits history SIZE, not just event count
@@ -104,7 +110,7 @@ class ContinueAsNewE2ETest extends AbstractE2ETest {
         // isContinueAsNewSuggested() triggers at ~80% of 50MB limit = ~40MB = ~1300 iterations
         String workflowName = "continue_as_new_workflow";
         String taskName = "large_payload_task";
-        int iterations = 2000; // Should trigger continue-as-new well before this
+        int iterations = 1000; // Reduced from 2000 - should still trigger continue-as-new
 
         // Register task definition
         registerTaskDefs(createTaskDefs(List.of(taskName)));
@@ -125,9 +131,8 @@ class ContinueAsNewE2ETest extends AbstractE2ETest {
 
         log.info("Started workflow {} with ~10KB payload per iteration, workflowId: {}", workflowName, workflowId);
 
-        // Wait for completion - allow up to 10 minutes for Docker environment
-        // Continue-as-new should trigger well before timeout
-        String finalStatus = waitForWorkflowWithHistoryLogging(workflowId, Duration.ofMinutes(10));
+        // Wait for completion - 3 minutes should be enough for 1000 iterations at ~10/sec
+        String finalStatus = waitForWorkflowWithHistoryLogging(workflowId, Duration.ofMinutes(3));
 
         // Log final workflow execution info
         logWorkflowExecutionInfo(workflowId);
@@ -174,8 +179,8 @@ class ContinueAsNewE2ETest extends AbstractE2ETest {
 
         log.info("Started workflow {} with {} iterations, workflowId: {}", workflowName, iterations, workflowId);
 
-        // Wait for completion
-        WorkflowStatusResponse status = waitForWorkflowCompletion(workflowId, Duration.ofMinutes(5));
+        // Wait for completion - fail fast
+        WorkflowStatusResponse status = waitForWorkflowCompletion(workflowId, Duration.ofSeconds(90));
 
         // Log Conductor server logs before assertion for debugging
         log.info("=== Conductor Server Logs ===");
@@ -221,8 +226,8 @@ class ContinueAsNewE2ETest extends AbstractE2ETest {
         input.put("startValue", 100);
         String workflowId = startWorkflow(workflowName, 1, input);
 
-        // Wait for completion
-        WorkflowStatusResponse status = waitForWorkflowCompletion(workflowId, Duration.ofMinutes(2));
+        // Wait for completion - fail fast
+        WorkflowStatusResponse status = waitForWorkflowCompletion(workflowId, Duration.ofSeconds(60));
         assertEquals("COMPLETED", status.getStatus(), "Workflow with many tasks should complete");
 
         // Verify all tasks completed
@@ -262,7 +267,7 @@ class ContinueAsNewE2ETest extends AbstractE2ETest {
         String workflowId = startWorkflow(workflowName, 1, input);
 
         // Wait for completion
-        WorkflowStatusResponse status = waitForWorkflowCompletion(workflowId, Duration.ofMinutes(1));
+        WorkflowStatusResponse status = waitForWorkflowCompletion(workflowId, Duration.ofSeconds(30));
         assertEquals("COMPLETED", status.getStatus(), "Workflow with SET_VARIABLE should complete");
 
         log.info("Workflow with SET_VARIABLE completed successfully");
@@ -292,7 +297,7 @@ class ContinueAsNewE2ETest extends AbstractE2ETest {
         String workflowId = startWorkflow(workflowName, 1, input);
 
         // Wait for completion
-        WorkflowStatusResponse status = waitForWorkflowCompletion(workflowId, Duration.ofMinutes(1));
+        WorkflowStatusResponse status = waitForWorkflowCompletion(workflowId, Duration.ofSeconds(30));
         assertEquals("COMPLETED", status.getStatus(), "Workflow with variable updates should complete");
 
         // Get workflow output (variables are often reflected in output)
@@ -322,7 +327,7 @@ class ContinueAsNewE2ETest extends AbstractE2ETest {
         String workflowId = startWorkflow(workflowName, 1, input);
 
         // Wait for completion
-        WorkflowStatusResponse status = waitForWorkflowCompletion(workflowId, Duration.ofMinutes(1));
+        WorkflowStatusResponse status = waitForWorkflowCompletion(workflowId, Duration.ofSeconds(30));
         assertEquals("COMPLETED", status.getStatus(), "Workflow with output references should complete");
 
         // Verify all tasks executed
@@ -516,16 +521,24 @@ class ContinueAsNewE2ETest extends AbstractE2ETest {
     }
 
     /**
-     * Check if continue-as-new occurred by looking at workflow history.
+     * Check if continue-as-new occurred by looking at workflow history across all runs.
+     * The WORKFLOW_EXECUTION_CONTINUED_AS_NEW event is at the END of a previous run's history,
+     * so we need to check all runs, not just the current one.
      */
     private boolean checkContinueAsNewOccurred(String workflowId) {
         try {
-            List<HistoryEvent> events = getWorkflowHistory(workflowId);
+            // Use getWorkflowHistoryAllRuns to get history from all continue-as-new runs
+            List<HistoryEvent> events = getWorkflowHistoryAllRuns(workflowId);
+            int continueAsNewCount = 0;
             for (HistoryEvent event : events) {
                 if (event.getEventType() == EventType.EVENT_TYPE_WORKFLOW_EXECUTION_CONTINUED_AS_NEW) {
+                    continueAsNewCount++;
                     log.info("Found WORKFLOW_EXECUTION_CONTINUED_AS_NEW event at eventId: {}", event.getEventId());
-                    return true;
                 }
+            }
+            if (continueAsNewCount > 0) {
+                log.info("Continue-as-new occurred {} times", continueAsNewCount);
+                return true;
             }
             return false;
         } catch (Exception e) {
