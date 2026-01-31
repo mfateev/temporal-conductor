@@ -50,6 +50,18 @@ public class DeterministicIdGenerator implements IdGeneratorProvider {
         this.prefix = prefix;
     }
 
+    /**
+     * Creates a new DeterministicIdGenerator with the specified prefix and starting sequence.
+     * Used when restoring from a continue-as-new checkpoint.
+     *
+     * @param prefix the prefix for generated IDs (typically the workflow run ID)
+     * @param startSequence the sequence number to start from
+     */
+    public DeterministicIdGenerator(String prefix, long startSequence) {
+        this.prefix = prefix;
+        this.sequence = startSequence;
+    }
+
     @Override
     public String generate() {
         sequence++;

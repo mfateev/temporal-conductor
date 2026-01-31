@@ -41,6 +41,9 @@ public class ConductorWorkflowInput {
     private String createdBy;
     private List<String> tags;
 
+    // Continue-as-new checkpoint (null for fresh workflows)
+    private ContinueAsNewCheckpoint checkpoint;
+
     /** Default constructor for Jackson. */
     public ConductorWorkflowInput() {
     }
@@ -78,6 +81,10 @@ public class ConductorWorkflowInput {
         return tags;
     }
 
+    public ContinueAsNewCheckpoint getCheckpoint() {
+        return checkpoint;
+    }
+
     // Setters
     public void setWorkflowDefJson(String workflowDefJson) {
         this.workflowDefJson = workflowDefJson;
@@ -109,6 +116,10 @@ public class ConductorWorkflowInput {
 
     public void setTags(List<String> tags) {
         this.tags = tags;
+    }
+
+    public void setCheckpoint(ContinueAsNewCheckpoint checkpoint) {
+        this.checkpoint = checkpoint;
     }
 
     /**
@@ -161,6 +172,11 @@ public class ConductorWorkflowInput {
 
         public Builder tags(List<String> tags) {
             input.tags = tags;
+            return this;
+        }
+
+        public Builder checkpoint(ContinueAsNewCheckpoint checkpoint) {
+            input.checkpoint = checkpoint;
             return this;
         }
 

@@ -38,6 +38,8 @@ import org.junit.jupiter.api.BeforeAll;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.reactive.ReactorClientHttpConnector;
+import org.springframework.web.reactive.function.client.ExchangeStrategies;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.testcontainers.containers.ComposeContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
@@ -115,10 +117,16 @@ public abstract class AbstractE2ETest {
                         .setNamespace(NAMESPACE)
                         .build());
 
-        // Initialize Conductor REST client
+        // Initialize Conductor REST client with increased buffer size for large workflow responses
+        int bufferSize = 16 * 1024 * 1024; // 16MB buffer for workflows with many tasks
+        ExchangeStrategies strategies = ExchangeStrategies.builder()
+                .codecs(codecs -> codecs.defaultCodecs().maxInMemorySize(bufferSize))
+                .build();
+
         conductorClient = WebClient.builder()
                 .baseUrl(conductorBaseUrl)
                 .defaultHeader("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                .exchangeStrategies(strategies)
                 .build();
 
         // Wait for Conductor to be fully ready
@@ -251,17 +259,32 @@ public abstract class AbstractE2ETest {
 
     /**
      * Get workflow execution history from Temporal.
+     * Uses pagination to retrieve all events for large histories.
      */
     protected List<HistoryEvent> getWorkflowHistory(String workflowId) {
-        GetWorkflowExecutionHistoryResponse response = workflowServiceStubs.blockingStub()
-                .getWorkflowExecutionHistory(
-                        GetWorkflowExecutionHistoryRequest.newBuilder()
-                                .setNamespace(NAMESPACE)
-                                .setExecution(WorkflowExecution.newBuilder()
-                                        .setWorkflowId(workflowId)
-                                        .build())
-                                .build());
-        return response.getHistory().getEventsList();
+        List<HistoryEvent> allEvents = new ArrayList<>();
+        com.google.protobuf.ByteString nextPageToken = com.google.protobuf.ByteString.EMPTY;
+
+        do {
+            GetWorkflowExecutionHistoryRequest.Builder requestBuilder =
+                    GetWorkflowExecutionHistoryRequest.newBuilder()
+                            .setNamespace(NAMESPACE)
+                            .setExecution(WorkflowExecution.newBuilder()
+                                    .setWorkflowId(workflowId)
+                                    .build());
+
+            if (!nextPageToken.isEmpty()) {
+                requestBuilder.setNextPageToken(nextPageToken);
+            }
+
+            GetWorkflowExecutionHistoryResponse response = workflowServiceStubs.blockingStub()
+                    .getWorkflowExecutionHistory(requestBuilder.build());
+
+            allEvents.addAll(response.getHistory().getEventsList());
+            nextPageToken = response.getNextPageToken();
+        } while (!nextPageToken.isEmpty());
+
+        return allEvents;
     }
 
     /**

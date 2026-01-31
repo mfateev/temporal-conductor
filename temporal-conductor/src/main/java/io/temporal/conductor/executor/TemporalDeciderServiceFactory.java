@@ -183,6 +183,25 @@ public class TemporalDeciderServiceFactory {
     }
 
     /**
+     * Create a factory configured for deterministic Temporal workflow execution,
+     * starting from a specific sequence number (for continue-as-new).
+     *
+     * @param metadataDao the MetadataDAO to use
+     * @param workflowRunId the workflow run ID for deterministic ID generation
+     * @param startSequence the sequence number to start from
+     * @return a new factory instance
+     */
+    public static TemporalDeciderServiceFactory forTemporalWorkflow(
+            MetadataDAO metadataDao,
+            String workflowRunId,
+            long startSequence) {
+        return new TemporalDeciderServiceFactory(
+                metadataDao,
+                new DeterministicIdGenerator(workflowRunId, startSequence)
+        );
+    }
+
+    /**
      * Create a factory with default (non-deterministic) ID generation.
      *
      * @param metadataDao the MetadataDAO to use

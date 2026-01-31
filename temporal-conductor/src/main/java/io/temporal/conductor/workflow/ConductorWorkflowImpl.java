@@ -30,12 +30,16 @@ import com.netflix.conductor.model.WorkflowModel;
 import io.temporal.activity.ActivityOptions;
 import io.temporal.common.RetryOptions;
 import io.temporal.workflow.ActivityStub;
+import io.temporal.conductor.executor.DeterministicIdGenerator;
 import io.temporal.conductor.executor.InMemoryMetadataDAO;
 import io.temporal.conductor.executor.SystemTaskExecutor;
 import io.temporal.conductor.executor.TemporalDeciderServiceFactory;
 import io.temporal.common.converter.EncodedValues;
 import io.temporal.conductor.workflow.model.ConductorWorkflowInput;
 import io.temporal.conductor.workflow.model.ConductorWorkflowOutput;
+import io.temporal.conductor.workflow.model.ContinueAsNewCheckpoint;
+import io.temporal.conductor.workflow.model.TaskSnapshot;
+import io.temporal.conductor.workflow.model.PendingTimer;
 import io.temporal.conductor.workflow.model.TaskExecutionResult;
 import io.temporal.conductor.workflow.model.TaskState;
 import io.temporal.conductor.workflow.model.WorkflowState;
@@ -77,7 +81,11 @@ import org.slf4j.Logger;
 public class ConductorWorkflowImpl implements DynamicWorkflow {
 
     private static final Logger logger = Workflow.getLogger(ConductorWorkflowImpl.class);
-    private static final int MAX_ITERATIONS = 1000;
+    private static final int MAX_ITERATIONS = 10000;
+
+    // Query response truncation settings - prevents timeouts when returning large data
+    private static final int MAX_DATA_VALUE_SIZE = 1024; // 1KB per string value
+    private static final String TRUNCATION_MARKER = "...[TRUNCATED]";
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -100,6 +108,11 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
     private volatile boolean isPaused = false;
     private long lastUpdateTime = 0;
 
+    // Continue-as-new state
+    private ConductorWorkflowInput workflowInput;
+    private DeterministicIdGenerator idGenerator;
+    private int continueAsNewCount = 0;
+
     // Activity stub for worker task execution (untyped for dynamic activity type)
     private final ActivityStub activities = Workflow.newUntypedActivityStub(
             ActivityOptions.newBuilder()
@@ -116,12 +129,20 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
     public Object execute(EncodedValues args) {
         // Decode input from EncodedValues
         ConductorWorkflowInput input = args.get(0, ConductorWorkflowInput.class);
+        this.workflowInput = input;
 
         String workflowRunId = Workflow.getInfo().getRunId();
         String workflowId = Workflow.getInfo().getWorkflowId();
         String workflowType = Workflow.getInfo().getWorkflowType();
 
-        logger.info("Starting Conductor workflow execution, type: {}, runId: {}", workflowType, workflowRunId);
+        boolean isContinuation = input.getCheckpoint() != null;
+        if (isContinuation) {
+            continueAsNewCount = input.getCheckpoint().getContinueAsNewCount();
+            logger.info("Continuing Conductor workflow execution (continuation #{}), type: {}, runId: {}",
+                    continueAsNewCount, workflowType, workflowRunId);
+        } else {
+            logger.info("Starting Conductor workflow execution, type: {}, runId: {}", workflowType, workflowRunId);
+        }
 
         // Register dynamic signal handlers
         registerSignalHandlers();
@@ -131,6 +152,11 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
 
         // Initialize Conductor components
         initializeConductorComponents(input, workflowRunId, workflowId);
+
+        // Restore state from checkpoint if this is a continuation
+        if (isContinuation) {
+            restoreFromCheckpoint(input.getCheckpoint());
+        }
 
         // Initialize search attributes
         WorkflowDef workflowDef = workflowModel.getWorkflowDefinition();
@@ -153,11 +179,14 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
         // Update failed task names if any
         updateFailedTaskNamesAttribute();
 
+        // Don't include taskOutputs in workflow result - it can grow very large with many tasks
+        // and cause the WorkflowExecutionCompleted event to exceed the 4MB gRPC limit.
+        // Task outputs are still available via the getTasks query or Temporal history.
         return new ConductorWorkflowOutput(
                 workflowModel.getStatus().name(),
                 workflowModel.getOutput() != null ? workflowModel.getOutput() : Collections.emptyMap(),
                 workflowModel.getReasonForIncompletion(),
-                new HashMap<>(taskOutputs)
+                Collections.emptyMap()
         );
     }
 
@@ -178,8 +207,14 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
         }
 
         // Create DeciderService with deterministic ID generation
+        // If restoring from checkpoint, use the sequence from the checkpoint
+        long startSequence = 0;
+        if (input.getCheckpoint() != null) {
+            startSequence = input.getCheckpoint().getLastTaskIdSequence();
+        }
+        idGenerator = new DeterministicIdGenerator(workflowRunId, startSequence);
         TemporalDeciderServiceFactory factory =
-                TemporalDeciderServiceFactory.forTemporalWorkflow(metadataDao, workflowRunId);
+                new TemporalDeciderServiceFactory(metadataDao, idGenerator);
         deciderService = factory.create();
 
         // Create SystemTaskExecutor with DeciderService for system task execution
@@ -261,12 +296,22 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
 
         while (!workflowModel.getStatus().isTerminal() && iterations < MAX_ITERATIONS) {
             iterations++;
-            logger.info("Scheduling loop iteration {}", iterations);
+            if (iterations % 5 == 1) {
+                long historySize = Workflow.getInfo().getHistorySize();
+                logger.info("Scheduling loop iteration {}, historySize={}KB, taskCount={}",
+                        iterations, historySize / 1024, workflowModel.getTasks().size());
+            }
 
             // Check for pause
             if (isPaused) {
                 Workflow.await(() -> !isPaused);
                 continue;
+            }
+
+            // Check for continue-as-new at safe checkpoint (no pending activities)
+            if (shouldContinueAsNew()) {
+                performContinueAsNew();
+                return;  // New workflow run will continue
             }
 
             // Get scheduling decision from DeciderService
@@ -293,7 +338,14 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
                 reEvaluateInProgressSystemTasks();
 
                 // Check again after re-evaluation - new tasks may have been scheduled
-                executeNewlyScheduledTasks();
+                boolean moreWorkNeeded = executeNewlyScheduledTasks();
+
+                // If we hit the iteration limit or continue-as-new is suggested, skip waiting
+                // and continue to next main loop iteration
+                if (moreWorkNeeded) {
+                    logger.debug("executeNewlyScheduledTasks indicates more work needed, continuing main loop");
+                    continue;
+                }
 
                 // Don't check shouldCompleteWorkflow() here - let DeciderService determine
                 // completion on the next iteration. DeciderOutcomeAccessor.isComplete(outcome)
@@ -355,8 +407,41 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
     }
 
     private void waitForSignalsOrChanges() {
-        // Check if there are any IN_PROGRESS tasks that might be waiting for signals
-        // (e.g., WAIT tasks without timeout)
+        // Check if there are any SCHEDULED tasks that should be executed
+        // This can happen if executeNewlyScheduledTasks() hit its maxIterations limit
+        boolean hasScheduledTasks = workflowModel.getTasks().stream()
+                .anyMatch(t -> t.getStatus() == TaskModel.Status.SCHEDULED);
+
+        // Check if there are IN_PROGRESS system tasks that can progress without external events
+        // (e.g., DO_WHILE ready for next iteration, vs WAIT waiting for timer/signal)
+        boolean hasProgressableSystemTasks = workflowModel.getTasks().stream()
+                .anyMatch(t -> t.getStatus() == TaskModel.Status.IN_PROGRESS
+                        && isSystemTask(t)
+                        && !TaskType.WAIT.name().equals(t.getTaskType())
+                        && !TaskType.JOIN.name().equals(t.getTaskType()));
+
+        // Log detailed task state for debugging
+        if (logger.isDebugEnabled()) {
+            List<String> inProgressSystemTasks = workflowModel.getTasks().stream()
+                    .filter(t -> t.getStatus() == TaskModel.Status.IN_PROGRESS && isSystemTask(t))
+                    .map(t -> t.getReferenceTaskName() + "(" + t.getTaskType() + ")")
+                    .collect(Collectors.toList());
+            logger.debug("waitForSignalsOrChanges: hasScheduledTasks={}, hasProgressableSystemTasks={}, " +
+                    "inProgressSystemTasks={}, activityPromises={}, pendingTaskIds={}",
+                    hasScheduledTasks, hasProgressableSystemTasks, inProgressSystemTasks,
+                    activityPromises.size(), pendingTaskIds.size());
+        }
+
+        // If there are scheduled tasks or progressable system tasks, don't wait
+        // Let the main loop continue to process them
+        if (hasScheduledTasks || hasProgressableSystemTasks) {
+            logger.info("Not waiting - hasScheduledTasks: {}, hasProgressableSystemTasks: {}",
+                    hasScheduledTasks, hasProgressableSystemTasks);
+            return;
+        }
+
+        // Check if there are any IN_PROGRESS tasks that might be waiting for external events
+        // (e.g., WAIT tasks, JOIN waiting for branches)
         boolean hasInProgressWaitingTasks = workflowModel.getTasks().stream()
                 .anyMatch(t -> t.getStatus() == TaskModel.Status.IN_PROGRESS);
 
@@ -381,6 +466,12 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
 
         // Process completed activities
         processCompletedActivities();
+
+        // Check for continue-as-new after activities complete (safe checkpoint)
+        if (shouldContinueAsNew()) {
+            performContinueAsNew();
+            return;
+        }
 
         // Process completed WAIT timers
         processCompletedWaitTimers();
@@ -739,8 +830,9 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
 
     /**
      * Execute any tasks that were scheduled but not yet executed.
+     * @return true if more work is needed (hit iteration limit or continue-as-new suggested)
      */
-    private void executeNewlyScheduledTasks() {
+    private boolean executeNewlyScheduledTasks() {
         int iterations = 0;
         int maxIterations = 100;
 
@@ -786,9 +878,46 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
                 }
             }
 
-            // Re-evaluate IN_PROGRESS system tasks
+            // Re-evaluate IN_PROGRESS system tasks (DO_WHILE, JOIN)
             reEvaluateInProgressSystemTasks();
+
+            // Check if continue-as-new is suggested after activity completion.
+            // Each activity is a yield point where WorkflowInfo is refreshed.
+            // This breaks the tight loop for long-running workflows.
+            if (Workflow.getInfo().isContinueAsNewSuggested() && canContinueAsNew()) {
+                logger.info("Continue-as-new suggested during executeNewlyScheduledTasks, " +
+                        "breaking to main loop");
+                return true;  // More work needed - continue-as-new check in main loop
+            }
         }
+
+        // Check if we hit the iteration limit with more scheduled tasks remaining
+        boolean hasMoreScheduledTasks = workflowModel.getTasks().stream()
+                .anyMatch(t -> t.getStatus() == TaskModel.Status.SCHEDULED);
+
+        // Check for IN_PROGRESS system tasks that should trigger more work
+        boolean hasProgressableSystemTasks = workflowModel.getTasks().stream()
+                .anyMatch(t -> t.getStatus() == TaskModel.Status.IN_PROGRESS
+                        && isSystemTask(t)
+                        && !TaskType.WAIT.name().equals(t.getTaskType())
+                        && !TaskType.JOIN.name().equals(t.getTaskType()));
+
+        if (iterations >= maxIterations && hasMoreScheduledTasks) {
+            logger.info("executeNewlyScheduledTasks hit iteration limit ({}) with more tasks pending",
+                    maxIterations);
+            return true;  // More work needed
+        }
+
+        // Also return true if there are progressable system tasks that need re-evaluation
+        if (hasProgressableSystemTasks) {
+            logger.info("executeNewlyScheduledTasks: returning true due to progressable system tasks " +
+                    "(iterations={}, hasMoreScheduledTasks={})", iterations, hasMoreScheduledTasks);
+            return true;  // More work needed - system tasks can schedule more work
+        }
+
+        logger.debug("executeNewlyScheduledTasks: returning false (iterations={}, hasMoreScheduledTasks={}, " +
+                "hasProgressableSystemTasks={})", iterations, hasMoreScheduledTasks, hasProgressableSystemTasks);
+        return false;  // All scheduled tasks processed
     }
 
     private void executeWorkerTasks(List<TaskModel> tasks) {
@@ -1013,6 +1142,35 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
 
     // ==================== Query Method Implementations ====================
 
+    /**
+     * Truncate large string values in a map to prevent query response timeouts.
+     * This only affects the query response; the actual workflow data remains intact.
+     */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> truncateData(Map<String, Object> data) {
+        if (data == null) {
+            return null;
+        }
+        Map<String, Object> truncated = new HashMap<>();
+        for (Map.Entry<String, Object> entry : data.entrySet()) {
+            Object value = entry.getValue();
+            if (value instanceof String) {
+                String strValue = (String) value;
+                if (strValue.length() > MAX_DATA_VALUE_SIZE) {
+                    truncated.put(entry.getKey(),
+                            strValue.substring(0, MAX_DATA_VALUE_SIZE) + TRUNCATION_MARKER);
+                } else {
+                    truncated.put(entry.getKey(), value);
+                }
+            } else if (value instanceof Map) {
+                truncated.put(entry.getKey(), truncateData((Map<String, Object>) value));
+            } else {
+                truncated.put(entry.getKey(), value);
+            }
+        }
+        return truncated;
+    }
+
     private WorkflowState getWorkflow() {
         return WorkflowState.builder()
                 .workflowId(workflowModel.getWorkflowId())
@@ -1025,9 +1183,9 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
                 .updateTime(lastUpdateTime)
                 .endTime(workflowModel.getStatus().isTerminal()
                         ? workflowModel.getEndTime() : null)
-                .input(workflowModel.getInput())
-                .output(workflowModel.getOutput())
-                .variables(workflowModel.getVariables())
+                .input(truncateData(workflowModel.getInput()))
+                .output(truncateData(workflowModel.getOutput()))
+                .variables(truncateData(workflowModel.getVariables()))
                 .correlationId(workflowModel.getCorrelationId())
                 .priority(workflowModel.getPriority())
                 .ownerApp(workflowModel.getOwnerApp())
@@ -1063,8 +1221,8 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
                 .startTime(task.getStartTime())
                 .updateTime(task.getUpdateTime())
                 .endTime(task.getEndTime())
-                .inputData(task.getInputData())
-                .outputData(task.getOutputData())
+                .inputData(truncateData(task.getInputData()))
+                .outputData(truncateData(task.getOutputData()))
                 .workerId(task.getWorkerId())
                 .pollCount(task.getPollCount())
                 .iteration(task.getIteration())
@@ -1155,5 +1313,209 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
 
             disableTaskTimeoutsRecursive(task.getLoopOver());
         }
+    }
+
+    // ==================== Continue-as-New Support ====================
+
+    /**
+     * Check if it's safe to perform continue-as-new.
+     * Continue-as-new can only be called when there are no pending activities.
+     */
+    private boolean canContinueAsNew() {
+        return activityPromises.isEmpty()
+                && !isPaused
+                && !workflowModel.getStatus().isTerminal();
+    }
+
+    /**
+     * Check if continue-as-new should be performed.
+     * Uses Temporal's built-in suggestion mechanism, plus a history length threshold
+     * to handle workflows with large payloads that cause slow replays.
+     */
+    private boolean shouldContinueAsNew() {
+        boolean suggested = Workflow.getInfo().isContinueAsNewSuggested();
+        boolean canDo = canContinueAsNew();
+        int taskCount = workflowModel.getTasks().size();
+        long historyLength = Workflow.getInfo().getHistoryLength();
+        long historySize = Workflow.getInfo().getHistorySize();
+
+        // Trigger continue-as-new based on history LENGTH in addition to size.
+        // With large payloads, replay time becomes an issue before the size threshold (~40MB).
+        // Workflow task timeout (default 10s) can be exceeded when replaying many events
+        // with large payloads. Threshold of 500 events is roughly 80 activities (~6 events each).
+        boolean historyLengthThreshold = historyLength > 500;
+
+        // Log every 5 tasks or when thresholds are approached
+        if (suggested || historyLengthThreshold || taskCount % 5 == 0) {
+            logger.info("Continue-as-new check: suggested={}, historyLengthThreshold={}, " +
+                    "canContinueAsNew={}, historySize={}KB, historyLength={}, taskCount={}",
+                    suggested, historyLengthThreshold, canDo, historySize / 1024, historyLength, taskCount);
+        }
+
+        return (suggested || historyLengthThreshold) && canDo;
+    }
+
+    /**
+     * Perform continue-as-new, preserving workflow state.
+     */
+    private void performContinueAsNew() {
+        logger.info("Performing continue-as-new (history length: {}, continuation #{})",
+                Workflow.getInfo().getHistoryLength(), continueAsNewCount + 1);
+
+        // Capture checkpoint state
+        ContinueAsNewCheckpoint checkpoint = new ContinueAsNewCheckpoint();
+        checkpoint.setCompletedTasks(tasksToSnapshots(workflowModel.getTasks()));
+        checkpoint.setVariables(workflowModel.getVariables() != null
+                ? new HashMap<>(workflowModel.getVariables()) : new HashMap<>());
+        checkpoint.setTaskOutputs(new HashMap<>(taskOutputs));
+        checkpoint.setCorrelationId(workflowModel.getCorrelationId());
+        checkpoint.setPriority(workflowModel.getPriority());
+        checkpoint.setOwnerApp(workflowModel.getOwnerApp());
+        checkpoint.setCreatedBy(workflowModel.getCreatedBy());
+        checkpoint.setOriginalCreateTime(workflowModel.getCreateTime());
+        checkpoint.setLastTaskIdSequence(idGenerator.getCurrentSequence());
+        checkpoint.setPendingTimers(capturePendingTimers());
+        checkpoint.setPendingSignals(new HashMap<>(pendingSignals));
+        checkpoint.setContinueAsNewCount(continueAsNewCount + 1);
+
+        // Create new input with checkpoint
+        ConductorWorkflowInput newInput = ConductorWorkflowInput.builder()
+                .workflowDefJson(workflowInput.getWorkflowDefJson())
+                .workflowInput(workflowInput.getWorkflowInput())
+                .taskDefsJson(workflowInput.getTaskDefsJson())
+                .correlationId(workflowInput.getCorrelationId())
+                .priority(workflowInput.getPriority())
+                .ownerApp(workflowInput.getOwnerApp())
+                .createdBy(workflowInput.getCreatedBy())
+                .tags(workflowInput.getTags())
+                .checkpoint(checkpoint)
+                .build();
+
+        // Continue as new
+        Workflow.continueAsNew(newInput);
+    }
+
+    /**
+     * Restore workflow state from a continue-as-new checkpoint.
+     */
+    private void restoreFromCheckpoint(ContinueAsNewCheckpoint checkpoint) {
+        logger.info("Restoring from checkpoint (continuation #{}, {} tasks, {} outputs)",
+                checkpoint.getContinueAsNewCount(),
+                checkpoint.getCompletedTasks().size(),
+                checkpoint.getTaskOutputs().size());
+
+        // Restore task history
+        workflowModel.getTasks().clear();
+        workflowModel.getTasks().addAll(snapshotsToTasks(checkpoint.getCompletedTasks()));
+
+        // Restore variables
+        if (checkpoint.getVariables() != null) {
+            workflowModel.setVariables(new HashMap<>(checkpoint.getVariables()));
+        }
+
+        // Restore task outputs
+        taskOutputs.putAll(checkpoint.getTaskOutputs());
+
+        // Restore metadata
+        workflowModel.setCorrelationId(checkpoint.getCorrelationId());
+        workflowModel.setPriority(checkpoint.getPriority());
+        workflowModel.setOwnerApp(checkpoint.getOwnerApp());
+        workflowModel.setCreatedBy(checkpoint.getCreatedBy());
+        workflowModel.setCreateTime(checkpoint.getOriginalCreateTime());
+
+        // Restore pending signals
+        pendingSignals.putAll(checkpoint.getPendingSignals());
+
+        // Recreate pending timers
+        for (PendingTimer timer : checkpoint.getPendingTimers()) {
+            if (timer.getRemainingDurationMs() > 0) {
+                Promise<Void> newTimer = Workflow.newTimer(Duration.ofMillis(timer.getRemainingDurationMs()));
+                waitTimers.put(timer.getTaskRefName(), newTimer);
+                logger.debug("Recreated timer for task {} with {}ms remaining",
+                        timer.getTaskRefName(), timer.getRemainingDurationMs());
+            }
+        }
+    }
+
+    /**
+     * Capture pending WAIT timers for continue-as-new.
+     */
+    private List<PendingTimer> capturePendingTimers() {
+        List<PendingTimer> timers = new ArrayList<>();
+        long currentTime = Workflow.currentTimeMillis();
+
+        for (Map.Entry<String, Promise<Void>> entry : waitTimers.entrySet()) {
+            String taskRefName = entry.getKey();
+
+            // Find the corresponding task to get the wait timeout
+            Optional<TaskModel> taskOpt = workflowModel.getTasks().stream()
+                    .filter(t -> t.getReferenceTaskName().equals(taskRefName))
+                    .findFirst();
+
+            if (taskOpt.isPresent()) {
+                TaskModel task = taskOpt.get();
+                long waitTimeout = task.getWaitTimeout();
+                if (waitTimeout > 0) {
+                    long remaining = waitTimeout - currentTime;
+                    if (remaining > 0) {
+                        timers.add(new PendingTimer(taskRefName, remaining));
+                    }
+                }
+            }
+        }
+
+        return timers;
+    }
+
+    /**
+     * Convert TaskModel list to TaskSnapshot list for serialization.
+     */
+    private List<TaskSnapshot> tasksToSnapshots(List<TaskModel> tasks) {
+        List<TaskSnapshot> snapshots = new ArrayList<>();
+        for (TaskModel task : tasks) {
+            TaskSnapshot snapshot = new TaskSnapshot();
+            snapshot.setTaskId(task.getTaskId());
+            snapshot.setTaskRefName(task.getReferenceTaskName());
+            snapshot.setTaskType(task.getTaskType());
+            snapshot.setTaskDefName(task.getTaskDefName());
+            snapshot.setStatus(task.getStatus() != null ? task.getStatus().name() : null);
+            snapshot.setInputData(task.getInputData() != null ? new HashMap<>(task.getInputData()) : new HashMap<>());
+            snapshot.setOutputData(task.getOutputData() != null ? new HashMap<>(task.getOutputData()) : new HashMap<>());
+            snapshot.setRetryCount(task.getRetryCount());
+            snapshot.setSeq(task.getSeq());
+            snapshot.setIteration(task.getIteration());
+            snapshot.setScheduledTime(task.getScheduledTime());
+            snapshot.setStartTime(task.getStartTime());
+            snapshot.setEndTime(task.getEndTime());
+            snapshots.add(snapshot);
+        }
+        return snapshots;
+    }
+
+    /**
+     * Convert TaskSnapshot list back to TaskModel list for restoration.
+     */
+    private List<TaskModel> snapshotsToTasks(List<TaskSnapshot> snapshots) {
+        List<TaskModel> tasks = new ArrayList<>();
+        for (TaskSnapshot snapshot : snapshots) {
+            TaskModel task = new TaskModel();
+            task.setTaskId(snapshot.getTaskId());
+            task.setReferenceTaskName(snapshot.getTaskRefName());
+            task.setTaskType(snapshot.getTaskType());
+            task.setTaskDefName(snapshot.getTaskDefName());
+            if (snapshot.getStatus() != null) {
+                task.setStatus(TaskModel.Status.valueOf(snapshot.getStatus()));
+            }
+            task.setInputData(snapshot.getInputData() != null ? new HashMap<>(snapshot.getInputData()) : new HashMap<>());
+            task.setOutputData(snapshot.getOutputData() != null ? new HashMap<>(snapshot.getOutputData()) : new HashMap<>());
+            task.setRetryCount(snapshot.getRetryCount());
+            task.setSeq(snapshot.getSeq());
+            task.setIteration(snapshot.getIteration());
+            task.setScheduledTime(snapshot.getScheduledTime());
+            task.setStartTime(snapshot.getStartTime());
+            task.setEndTime(snapshot.getEndTime());
+            tasks.add(task);
+        }
+        return tasks;
     }
 }

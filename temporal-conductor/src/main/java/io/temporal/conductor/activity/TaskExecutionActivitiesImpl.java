@@ -75,19 +75,15 @@ public class TaskExecutionActivitiesImpl implements DynamicActivity {
             String taskRefName,
             Map<String, Object> input) {
 
-        // Default simple task - echo input with metadata
+        // Default simple task - return minimal output metadata
+        // NOTE: We intentionally do NOT echo input data back in output.
+        // Echoing large inputs would cause the workflow history to grow excessively,
+        // potentially exceeding the 4MB gRPC limit for workflow events.
         Map<String, Object> output = new HashMap<>();
         output.put("taskName", taskName);
         output.put("taskRefName", taskRefName);
         output.put("result", "completed");
         output.put("processedAt", System.currentTimeMillis());
-
-        // Pass through input data
-        if (input != null) {
-            for (Map.Entry<String, Object> entry : input.entrySet()) {
-                output.put("input_" + entry.getKey(), entry.getValue());
-            }
-        }
 
         logger.info("Simple task completed: {}", taskRefName);
         return TaskExecutionResult.builder().output(output).build();

@@ -55,10 +55,12 @@ import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 /**
  * Tests for ConductorWorkflow implementation.
  */
+@Timeout(60)  // Fail fast if any test hangs
 class ConductorWorkflowTest {
 
     private static final String TASK_QUEUE = "conductor-test-queue";
@@ -110,7 +112,9 @@ class ConductorWorkflowTest {
 
         assertEquals("COMPLETED", output.getStatus());
         assertNotNull(output.getOutput());
-        assertFalse(output.getTaskOutputs().isEmpty());
+        // Note: taskOutputs is no longer returned in workflow result to avoid 4MB gRPC limit
+        // Use getTasks query to verify task execution instead
+        assertTrue(output.getTaskOutputs().isEmpty());
     }
 
     @Test
@@ -216,9 +220,10 @@ class ConductorWorkflowTest {
         ConductorWorkflowOutput output = workflow.getResult(ConductorWorkflowOutput.class);
 
         assertEquals("COMPLETED", output.getStatus());
-        assertEquals(2, output.getTaskOutputs().size());
-        assertTrue(output.getTaskOutputs().containsKey("task1_ref"));
-        assertTrue(output.getTaskOutputs().containsKey("task2_ref"));
+        // Verify tasks via query instead of taskOutputs in result
+        WorkflowStub queryStub = client.newUntypedWorkflowStub(options.getWorkflowId());
+        List<TaskState> tasks = queryStub.query("getTasks", List.class);
+        assertEquals(2, tasks.size());
     }
 
     @Test
@@ -236,11 +241,13 @@ class ConductorWorkflowTest {
         ConductorWorkflowOutput output = workflow.getResult(ConductorWorkflowOutput.class);
 
         assertEquals("COMPLETED", output.getStatus());
-        assertTrue(output.getTaskOutputs().containsKey("simple_task_ref"));
-
-        Map<String, Object> taskOutput = output.getTaskOutputs().get("simple_task_ref");
-        assertNotNull(taskOutput);
-        assertEquals("completed", taskOutput.get("result"));
+        // Verify task completion via query instead of taskOutputs in result
+        WorkflowStub queryStub = client.newUntypedWorkflowStub(options.getWorkflowId());
+        List<?> tasks = queryStub.query("getTasks", List.class);
+        assertFalse(tasks.isEmpty());
+        // Verify a task completed with expected output via query
+        Map<String, Object> taskMap = (Map<String, Object>) tasks.get(0);
+        assertEquals("COMPLETED", taskMap.get("status"));
     }
 
     @Test
@@ -261,7 +268,13 @@ class ConductorWorkflowTest {
         ConductorWorkflowOutput output = workflow.getResult(ConductorWorkflowOutput.class);
 
         assertEquals("COMPLETED", output.getStatus());
-        assertTrue(output.getTaskOutputs().containsKey("wait_task_ref"));
+        // Verify WAIT task completed via query
+        WorkflowStub queryStub = client.newUntypedWorkflowStub(options.getWorkflowId());
+        List<?> tasks = queryStub.query("getTasks", List.class);
+        assertFalse(tasks.isEmpty());
+        Map<String, Object> taskMap = (Map<String, Object>) tasks.get(0);
+        assertEquals("wait_task_ref", taskMap.get("referenceTaskName"));
+        assertEquals("COMPLETED", taskMap.get("status"));
     }
 
     @Test
@@ -317,7 +330,21 @@ class ConductorWorkflowTest {
         ConductorWorkflowOutput output = workflow.getResult(10, TimeUnit.SECONDS, ConductorWorkflowOutput.class);
 
         assertEquals("COMPLETED", output.getStatus());
-        Map<String, Object> waitOutput = output.getTaskOutputs().get("wait_task_ref");
+        // Verify WAIT task output via query
+        List<?> completedTasks = queryStub.query("getTasks", List.class);
+        Map<String, Object> completedWaitTask = null;
+        for (Object taskObj : completedTasks) {
+            Map<String, Object> taskMap = (Map<String, Object>) taskObj;
+            if ("wait_task_ref".equals(taskMap.get("referenceTaskName"))) {
+                completedWaitTask = taskMap;
+                break;
+            }
+        }
+        assertNotNull(completedWaitTask, "WAIT task should exist in completed tasks");
+        assertEquals("COMPLETED", completedWaitTask.get("status"));
+        // Check that signal output was stored in task output
+        @SuppressWarnings("unchecked")
+        Map<String, Object> waitOutput = (Map<String, Object>) completedWaitTask.get("outputData");
         assertNotNull(waitOutput);
         assertEquals("completed-by-signal", waitOutput.get("signalResult"));
     }
@@ -340,13 +367,21 @@ class ConductorWorkflowTest {
 
         assertEquals("COMPLETED", output.getStatus());
 
-        // Verify all fork branches completed
-        assertTrue(output.getTaskOutputs().containsKey("branch1_task_ref"));
-        assertTrue(output.getTaskOutputs().containsKey("branch2_task_ref"));
-        assertTrue(output.getTaskOutputs().containsKey("branch3_task_ref"));
+        // Verify all fork branches and final task completed via query
+        WorkflowStub queryStub = client.newUntypedWorkflowStub(workflowId);
+        List<?> tasks = queryStub.query("getTasks", List.class);
 
-        // Verify final task after JOIN completed
-        assertTrue(output.getTaskOutputs().containsKey("final_task_ref"));
+        // Collect task reference names
+        List<String> taskRefNames = new ArrayList<>();
+        for (Object taskObj : tasks) {
+            Map<String, Object> taskMap = (Map<String, Object>) taskObj;
+            taskRefNames.add((String) taskMap.get("referenceTaskName"));
+        }
+
+        assertTrue(taskRefNames.contains("branch1_task_ref"), "branch1 should be completed");
+        assertTrue(taskRefNames.contains("branch2_task_ref"), "branch2 should be completed");
+        assertTrue(taskRefNames.contains("branch3_task_ref"), "branch3 should be completed");
+        assertTrue(taskRefNames.contains("final_task_ref"), "final task should be completed");
 
         // Verify execution history shows activities were scheduled
         GetWorkflowExecutionHistoryResponse historyResponse = testEnv.getWorkflowServiceStubs()
@@ -441,12 +476,23 @@ class ConductorWorkflowTest {
         ConductorWorkflowOutput output = workflow.getResult(ConductorWorkflowOutput.class);
 
         assertEquals("COMPLETED", output.getStatus());
-        assertEquals(3, output.getTaskOutputs().size());
 
-        // Verify tasks completed in order
-        assertTrue(output.getTaskOutputs().containsKey("task1_ref"));
-        assertTrue(output.getTaskOutputs().containsKey("task2_ref"));
-        assertTrue(output.getTaskOutputs().containsKey("task3_ref"));
+        // Verify all 3 tasks completed via query
+        WorkflowStub queryStub = client.newUntypedWorkflowStub(options.getWorkflowId());
+        List<?> tasks = queryStub.query("getTasks", List.class);
+        assertEquals(3, tasks.size());
+
+        // Collect task reference names
+        List<String> taskRefNames = new ArrayList<>();
+        for (Object taskObj : tasks) {
+            Map<String, Object> taskMap = (Map<String, Object>) taskObj;
+            taskRefNames.add((String) taskMap.get("referenceTaskName"));
+        }
+
+        // Verify tasks completed
+        assertTrue(taskRefNames.contains("task1_ref"));
+        assertTrue(taskRefNames.contains("task2_ref"));
+        assertTrue(taskRefNames.contains("task3_ref"));
     }
 
     // Helper methods to create workflow inputs

@@ -163,8 +163,15 @@ public class SystemTaskExecutor {
 
         WorkflowSystemTask systemTask = systemTaskRegistry.get(task.getTaskType());
 
-        logger.debug("Executing system task: {} ({})",
-                task.getReferenceTaskName(), task.getTaskType());
+        // Enhanced logging for DO_WHILE debugging
+        if (TaskType.DO_WHILE.name().equals(task.getTaskType())) {
+            logger.info("DO_WHILE execute: task={}, status={}, iteration={}, workflowTask={}",
+                    task.getReferenceTaskName(), task.getStatus(), task.getIteration(),
+                    task.getWorkflowTask() != null ? task.getWorkflowTask().getLoopCondition() : "null");
+        } else {
+            logger.debug("Executing system task: {} ({})",
+                    task.getReferenceTaskName(), task.getTaskType());
+        }
 
         // Call start() first if task is SCHEDULED
         if (task.getStatus() == TaskModel.Status.SCHEDULED) {
@@ -178,8 +185,16 @@ public class SystemTaskExecutor {
         // Call execute() if task is not terminal
         if (!task.getStatus().isTerminal()) {
             boolean statusChanged = systemTask.execute(workflow, task, inMemoryWorkflowExecutor);
-            logger.debug("System task {} execute() returned: {}, status: {}",
-                    task.getReferenceTaskName(), statusChanged, task.getStatus());
+
+            // Enhanced logging for DO_WHILE debugging
+            if (TaskType.DO_WHILE.name().equals(task.getTaskType())) {
+                logger.info("DO_WHILE after execute: task={}, statusChanged={}, status={}, iteration={}, outputData={}",
+                        task.getReferenceTaskName(), statusChanged, task.getStatus(),
+                        task.getIteration(), task.getOutputData());
+            } else {
+                logger.debug("System task {} execute() returned: {}, status: {}",
+                        task.getReferenceTaskName(), statusChanged, task.getStatus());
+            }
             return statusChanged;
         }
 
