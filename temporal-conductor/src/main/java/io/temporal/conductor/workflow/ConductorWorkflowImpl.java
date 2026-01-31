@@ -19,6 +19,7 @@ package io.temporal.conductor.workflow;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.netflix.conductor.common.metadata.tasks.TaskDef;
+import com.netflix.conductor.common.metadata.tasks.TaskDef.RetryLogic;
 import com.netflix.conductor.common.metadata.tasks.TaskType;
 import com.netflix.conductor.common.metadata.workflow.WorkflowDef;
 import com.netflix.conductor.common.metadata.workflow.WorkflowTask;
@@ -106,16 +107,11 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
     private DeterministicIdGenerator idGenerator;
     private int continueAsNewCount = 0;
 
-    private final ActivityStub activities = Workflow.newUntypedActivityStub(
-            ActivityOptions.newBuilder()
-                    .setStartToCloseTimeout(Duration.ofMinutes(10))
-                    .setRetryOptions(
-                            RetryOptions.newBuilder()
-                                    .setMaximumAttempts(3)
-                                    .build()
-                    )
-                    .build()
-    );
+    // Default timeouts when TaskDef doesn't specify values
+    private static final Duration DEFAULT_START_TO_CLOSE_TIMEOUT = Duration.ofMinutes(10);
+    private static final Duration DEFAULT_SCHEDULE_TO_START_TIMEOUT = Duration.ofMinutes(5);
+    private static final int DEFAULT_RETRY_COUNT = 3;
+    private static final Duration DEFAULT_RETRY_DELAY = Duration.ofSeconds(1);
 
     @Override
     public Object execute(EncodedValues args) {
@@ -867,6 +863,78 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
     }
 
     /**
+     * Build ActivityOptions from Conductor TaskDef configuration.
+     *
+     * <p>Maps Conductor timeouts to Temporal:
+     * <ul>
+     *   <li>pollTimeoutSeconds → scheduleToStartTimeout (queue time)</li>
+     *   <li>timeoutSeconds → startToCloseTimeout (execution time)</li>
+     *   <li>responseTimeoutSeconds → heartbeatTimeout (worker liveness)</li>
+     * </ul>
+     */
+    private ActivityOptions buildActivityOptions(TaskModel task) {
+        TaskDef taskDef = metadataDao.getTaskDef(task.getTaskDefName());
+
+        // Build retry options from TaskDef
+        RetryOptions.Builder retryBuilder = RetryOptions.newBuilder();
+
+        if (taskDef != null && taskDef.getRetryCount() > 0) {
+            // Temporal maxAttempts = initial attempt + retries
+            retryBuilder.setMaximumAttempts(taskDef.getRetryCount() + 1);
+
+            if (taskDef.getRetryDelaySeconds() > 0) {
+                retryBuilder.setInitialInterval(Duration.ofSeconds(taskDef.getRetryDelaySeconds()));
+
+                // Map Conductor retry logic to Temporal backoff coefficient
+                if (taskDef.getRetryLogic() == RetryLogic.EXPONENTIAL_BACKOFF) {
+                    int scaleFactor = taskDef.getBackoffScaleFactor() != null
+                            ? taskDef.getBackoffScaleFactor() : 2;
+                    retryBuilder.setBackoffCoefficient(scaleFactor);
+                } else if (taskDef.getRetryLogic() == RetryLogic.LINEAR_BACKOFF) {
+                    int scaleFactor = taskDef.getBackoffScaleFactor() != null
+                            ? taskDef.getBackoffScaleFactor() : 1;
+                    retryBuilder.setBackoffCoefficient(scaleFactor);
+                } else {
+                    // FIXED - no backoff
+                    retryBuilder.setBackoffCoefficient(1.0);
+                }
+            } else {
+                retryBuilder.setInitialInterval(DEFAULT_RETRY_DELAY);
+            }
+        } else {
+            retryBuilder.setMaximumAttempts(DEFAULT_RETRY_COUNT + 1);
+            retryBuilder.setInitialInterval(DEFAULT_RETRY_DELAY);
+        }
+
+        // Build activity options with timeout mapping
+        ActivityOptions.Builder optionsBuilder = ActivityOptions.newBuilder()
+                .setRetryOptions(retryBuilder.build());
+
+        // timeoutSeconds → startToCloseTimeout (execution time)
+        if (taskDef != null && taskDef.getTimeoutSeconds() > 0) {
+            optionsBuilder.setStartToCloseTimeout(Duration.ofSeconds(taskDef.getTimeoutSeconds()));
+        } else {
+            optionsBuilder.setStartToCloseTimeout(DEFAULT_START_TO_CLOSE_TIMEOUT);
+        }
+
+        // pollTimeoutSeconds → scheduleToStartTimeout (queue time)
+        if (taskDef != null && taskDef.getPollTimeoutSeconds() != null
+                && taskDef.getPollTimeoutSeconds() > 0) {
+            optionsBuilder.setScheduleToStartTimeout(
+                    Duration.ofSeconds(taskDef.getPollTimeoutSeconds()));
+        }
+
+        // responseTimeoutSeconds → heartbeatTimeout (worker liveness)
+        // Only set if the activity implementation supports heartbeating
+        if (taskDef != null && taskDef.getResponseTimeoutSeconds() > 0) {
+            optionsBuilder.setHeartbeatTimeout(
+                    Duration.ofSeconds(taskDef.getResponseTimeoutSeconds()));
+        }
+
+        return optionsBuilder.build();
+    }
+
+    /**
      * Start a worker task asynchronously - returns immediately.
      * The task completion will be handled by processCompletedActivities().
      */
@@ -877,16 +945,17 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
         task.setStatus(TaskModel.Status.IN_PROGRESS);
         task.setStartTime(Workflow.currentTimeMillis());
 
-        // Start activity asynchronously - activity type is the task definition name
+        ActivityOptions options = buildActivityOptions(task);
+        ActivityStub activityStub = Workflow.newUntypedActivityStub(options);
+
         String activityType = task.getTaskDefName();
-        Promise<TaskExecutionResult> promise = activities.executeAsync(
+        Promise<TaskExecutionResult> promise = activityStub.executeAsync(
                 activityType,
                 TaskExecutionResult.class,
                 task.getReferenceTaskName(),
                 task.getInputData() != null ? task.getInputData() : Collections.emptyMap()
         );
 
-        // Track the promise for later completion handling
         activityPromises.put(task.getTaskId(), promise);
         pendingTaskIds.add(task.getTaskId());
     }
@@ -902,9 +971,11 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
         task.setStartTime(Workflow.currentTimeMillis());
 
         try {
-            // Activity type is the task definition name
+            ActivityOptions options = buildActivityOptions(task);
+            ActivityStub activityStub = Workflow.newUntypedActivityStub(options);
+
             String activityType = task.getTaskDefName();
-            TaskExecutionResult result = activities.execute(
+            TaskExecutionResult result = activityStub.execute(
                     activityType,
                     TaskExecutionResult.class,
                     task.getReferenceTaskName(),
