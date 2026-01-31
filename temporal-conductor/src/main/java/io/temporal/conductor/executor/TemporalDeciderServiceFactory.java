@@ -100,13 +100,9 @@ public class TemporalDeciderServiceFactory {
      * @return a new DeciderService instance
      */
     public DeciderService create() {
-        // Wrap the provider in our adapter
         TemporalIdGenerator idGenerator = new TemporalIdGenerator(idGeneratorProvider);
-
-        // Create ParametersUtils for expression evaluation
         ParametersUtils parametersUtils = new ParametersUtils(objectMapper);
 
-        // Create ExternalPayloadStorageUtils (dummy implementation)
         DummyPayloadStorage externalPayloadStorage = new DummyPayloadStorage();
         ConductorProperties conductorProperties = new ConductorProperties();
         ExternalPayloadStorageUtils externalPayloadStorageUtils = new ExternalPayloadStorageUtils(
@@ -115,10 +111,7 @@ public class TemporalDeciderServiceFactory {
                 objectMapper
         );
 
-        // Create SystemTaskRegistry (empty for now)
         SystemTaskRegistry systemTaskRegistry = new SystemTaskRegistry(Collections.emptySet());
-
-        // Create TaskMappers
         Map<String, TaskMapper> taskMappers = createTaskMappers(parametersUtils);
 
         return new DeciderService(
@@ -135,16 +128,13 @@ public class TemporalDeciderServiceFactory {
     private Map<String, TaskMapper> createTaskMappers(ParametersUtils parametersUtils) {
         Map<String, TaskMapper> mappers = new HashMap<>();
 
-        // SimpleTaskMapper for SIMPLE task type
         SimpleTaskMapper simpleMapper = new SimpleTaskMapper(parametersUtils);
         mappers.put(TaskType.SIMPLE.name(), simpleMapper);
 
-        // UserDefinedTaskMapper as fallback for custom task types
         UserDefinedTaskMapper userDefinedMapper =
                 new UserDefinedTaskMapper(parametersUtils, metadataDao);
         mappers.put(TaskType.USER_DEFINED.name(), userDefinedMapper);
 
-        // System task mappers
         ForkJoinTaskMapper forkJoinMapper = new ForkJoinTaskMapper();
         mappers.put(TaskType.FORK_JOIN.name(), forkJoinMapper);
 

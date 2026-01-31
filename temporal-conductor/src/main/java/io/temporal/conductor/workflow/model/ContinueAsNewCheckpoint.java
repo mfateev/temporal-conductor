@@ -28,13 +28,17 @@ import java.util.Map;
  * <p>This class captures the workflow state needed to resume execution
  * after a continue-as-new operation. It includes:
  * <ul>
- *   <li>Completed task history and outputs</li>
+ *   <li>Completed task history (with outputs stored in TaskSnapshot)</li>
  *   <li>Workflow variables</li>
  *   <li>Metadata (correlation ID, priority, etc.)</li>
  *   <li>ID generator sequence for deterministic task ID generation</li>
  *   <li>Pending timers to recreate</li>
  *   <li>Pending signals to process</li>
  * </ul>
+ *
+ * <p>Note: Task outputs are stored within TaskSnapshot.outputData, not in a separate map.
+ * This avoids data duplication since Conductor's expression evaluation uses
+ * WorkflowModel.getTasks() which contains the outputs directly.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class ContinueAsNewCheckpoint {
@@ -42,7 +46,6 @@ public class ContinueAsNewCheckpoint {
     // Task state
     private List<TaskSnapshot> completedTasks = new ArrayList<>();
     private Map<String, Object> variables = new HashMap<>();
-    private Map<String, Map<String, Object>> taskOutputs = new HashMap<>();
 
     // Metadata
     private String correlationId;
@@ -81,14 +84,6 @@ public class ContinueAsNewCheckpoint {
 
     public void setVariables(Map<String, Object> variables) {
         this.variables = variables;
-    }
-
-    public Map<String, Map<String, Object>> getTaskOutputs() {
-        return taskOutputs;
-    }
-
-    public void setTaskOutputs(Map<String, Map<String, Object>> taskOutputs) {
-        this.taskOutputs = taskOutputs;
     }
 
     public String getCorrelationId() {

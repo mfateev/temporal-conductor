@@ -99,7 +99,6 @@ public class TemporalWorkflowService implements WorkflowService {
         logger.info("Starting workflow: name={}, id={}", request.getName(), workflowId);
 
         try {
-            // Get workflow definition
             WorkflowDef workflowDef;
             if (request.getWorkflowDef() != null) {
                 workflowDef = request.getWorkflowDef();
@@ -117,10 +116,8 @@ public class TemporalWorkflowService implements WorkflowService {
                         "Workflow definition not found: " + request.getName());
             }
 
-            // Build task definitions map
             Map<String, String> taskDefsJson = buildTaskDefsJson(workflowDef);
 
-            // Create workflow input
             ConductorWorkflowInput input = ConductorWorkflowInput.builder()
                     .workflowDefJson(OBJECT_MAPPER.writeValueAsString(workflowDef))
                     .workflowInput(request.getInput() != null
@@ -131,13 +128,11 @@ public class TemporalWorkflowService implements WorkflowService {
                     .createdBy(request.getCreatedBy())
                     .build();
 
-            // Start workflow with Conductor workflow name as the Temporal workflow type
             WorkflowOptions options = WorkflowOptions.newBuilder()
                     .setWorkflowId(workflowId)
                     .setTaskQueue(taskQueue)
                     .build();
 
-            // Use untyped stub with Conductor workflow name as the workflow type
             WorkflowStub workflow = workflowClient.newUntypedWorkflowStub(
                     workflowDef.getName(), options);
             workflow.start(input);
@@ -211,7 +206,6 @@ public class TemporalWorkflowService implements WorkflowService {
     public String restartWorkflow(String workflowId, boolean useLatestDefinitions) {
         logger.info("Restarting workflow: id={}, useLatest={}", workflowId, useLatestDefinitions);
 
-        // Get the original workflow to extract its definition and input
         Workflow originalWorkflow = getWorkflow(workflowId, false);
 
         StartWorkflowRequest request = new StartWorkflowRequest();
@@ -227,8 +221,6 @@ public class TemporalWorkflowService implements WorkflowService {
     @Override
     public void retryWorkflow(String workflowId, boolean resumeSubworkflowTasks) {
         logger.info("Retrying workflow: id={}", workflowId);
-        // For Temporal, retry is effectively a restart
-        // A more sophisticated implementation would use continue-as-new or retry policies
         restartWorkflow(workflowId, false);
     }
 
@@ -272,7 +264,6 @@ public class TemporalWorkflowService implements WorkflowService {
         logger.debug("Searching workflows: start={}, size={}, query={}", start, size, query);
 
         try {
-            // Build Temporal visibility query
             String temporalQuery = buildTemporalQuery(query, freeText);
 
             ListWorkflowExecutionsRequest request = ListWorkflowExecutionsRequest.newBuilder()
@@ -304,7 +295,6 @@ public class TemporalWorkflowService implements WorkflowService {
         logger.debug("Searching workflows v2: start={}, size={}, query={}", start, size, query);
 
         try {
-            // Build Temporal visibility query
             String temporalQuery = buildTemporalQuery(query, freeText);
 
             ListWorkflowExecutionsRequest request = ListWorkflowExecutionsRequest.newBuilder()
@@ -319,7 +309,6 @@ public class TemporalWorkflowService implements WorkflowService {
 
             List<Workflow> workflows = new ArrayList<>();
             for (WorkflowExecutionInfo info : response.getExecutionsList()) {
-                // Get full workflow details for each execution
                 try {
                     Workflow workflow = getWorkflow(info.getExecution().getWorkflowId(), true);
                     if (workflow != null) {
@@ -339,14 +328,10 @@ public class TemporalWorkflowService implements WorkflowService {
     }
 
     private String buildTemporalQuery(String conductorQuery, String freeText) {
-        // With dynamic workflows, WorkflowType equals the Conductor workflow name
-        // No default filter needed - return all workflows unless filtered
         StringBuilder queryBuilder = new StringBuilder();
         boolean hasClause = false;
 
         if (conductorQuery != null && !conductorQuery.isEmpty() && !conductorQuery.equals("*")) {
-            // Parse Conductor query format: field:value AND field:value
-            // Convert to Temporal format
             String[] parts = conductorQuery.split("\\s+AND\\s+");
             for (String part : parts) {
                 String[] keyValue = part.split(":", 2);
@@ -359,20 +344,17 @@ public class TemporalWorkflowService implements WorkflowService {
                     }
                     hasClause = true;
 
-                    // Map Conductor fields to Temporal search attributes
                     switch (key.toLowerCase()) {
                         case "status":
                             queryBuilder.append("ConductorStatus = '").append(value).append("'");
                             break;
                         case "workflowtype":
-                            // WorkflowType now equals the Conductor workflow name
                             queryBuilder.append("WorkflowType = '").append(value).append("'");
                             break;
                         case "workflowid":
                             queryBuilder.append("WorkflowId = '").append(value).append("'");
                             break;
                         default:
-                            // Try to use as-is if it looks like a Temporal search attribute
                             if (key.startsWith("Conductor") || key.equals("WorkflowId") || key.equals("ExecutionStatus")) {
                                 queryBuilder.append(key).append(" = '").append(value).append("'");
                             } else {
@@ -392,14 +374,9 @@ public class TemporalWorkflowService implements WorkflowService {
     private WorkflowSummary convertToWorkflowSummary(WorkflowExecutionInfo info) {
         WorkflowSummary summary = new WorkflowSummary();
         summary.setWorkflowId(info.getExecution().getWorkflowId());
-
-        // With dynamic workflows, WorkflowType equals the Conductor workflow name
         summary.setWorkflowType(info.getType().getName());
-
-        // Map Temporal status to Conductor status
         summary.setStatus(mapTemporalStatusToConductor(info.getStatus()));
 
-        // Set timestamps
         if (info.hasStartTime()) {
             long startMillis = info.getStartTime().getSeconds() * 1000
                     + info.getStartTime().getNanos() / 1_000_000;
@@ -414,7 +391,7 @@ public class TemporalWorkflowService implements WorkflowService {
         return summary;
     }
 
-    private String mapTemporalStatusToConductor(WorkflowExecutionStatus temporalStatus) {
+    private static String mapTemporalStatusToConductor(WorkflowExecutionStatus temporalStatus) {
         switch (temporalStatus) {
             case WORKFLOW_EXECUTION_STATUS_RUNNING:
                 return "RUNNING";
@@ -435,8 +412,6 @@ public class TemporalWorkflowService implements WorkflowService {
         }
     }
 
-    // Helper methods
-
     private Map<String, String> buildTaskDefsJson(WorkflowDef workflowDef) {
         Map<String, String> taskDefsJson = new HashMap<>();
 
@@ -449,7 +424,6 @@ public class TemporalWorkflowService implements WorkflowService {
                     logger.warn("Failed to serialize task definition: {}", taskName);
                 }
             } else {
-                // Create a minimal task definition if not found
                 TaskDef minimalDef = new TaskDef();
                 minimalDef.setName(taskName);
                 try {
@@ -475,7 +449,6 @@ public class TemporalWorkflowService implements WorkflowService {
                 names.add(task.getName());
             }
 
-            // Recurse into nested structures
             if (task.getDecisionCases() != null) {
                 for (List<com.netflix.conductor.common.metadata.workflow.WorkflowTask> caseTasks
                         : task.getDecisionCases().values()) {
@@ -513,11 +486,9 @@ public class TemporalWorkflowService implements WorkflowService {
         workflow.setVariables(state.getVariables());
         workflow.setReasonForIncompletion(state.getReasonForIncompletion());
 
-        // Look up and attach the workflow definition from metadata
         WorkflowDef workflowDef = metadataService.getWorkflowDef(
                 state.getWorkflowType(), state.getVersion());
         if (workflowDef == null) {
-            // Try latest version if specific version not found
             workflowDef = metadataService.getLatestWorkflowDef(state.getWorkflowType());
         }
         workflow.setWorkflowDefinition(workflowDef);
@@ -539,7 +510,6 @@ public class TemporalWorkflowService implements WorkflowService {
             }
             workflow.setTasks(tasks);
 
-            // Collect failed task names
             HashSet<String> failedTaskNames = new HashSet<>();
             for (TaskState taskState : state.getTasks()) {
                 if ("FAILED".equals(taskState.getStatus())

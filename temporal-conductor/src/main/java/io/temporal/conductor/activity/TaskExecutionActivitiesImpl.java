@@ -48,7 +48,6 @@ public class TaskExecutionActivitiesImpl implements DynamicActivity {
 
     @Override
     public Object execute(EncodedValues args) {
-        // The activity type is the Conductor task name
         String taskName = Activity.getExecutionContext().getInfo().getActivityType();
         String taskRefName = args.get(0, String.class);
         @SuppressWarnings("unchecked")
@@ -75,10 +74,6 @@ public class TaskExecutionActivitiesImpl implements DynamicActivity {
             String taskRefName,
             Map<String, Object> input) {
 
-        // Default simple task - return minimal output metadata
-        // NOTE: We intentionally do NOT echo input data back in output.
-        // Echoing large inputs would cause the workflow history to grow excessively,
-        // potentially exceeding the 4MB gRPC limit for workflow events.
         Map<String, Object> output = new HashMap<>();
         output.put("taskName", taskName);
         output.put("taskRefName", taskRefName);
@@ -94,7 +89,6 @@ public class TaskExecutionActivitiesImpl implements DynamicActivity {
             String taskName,
             String taskRefName,
             Map<String, Object> input) {
-        // Mock HTTP task execution
         String url = "http://example.com";
         if (input != null) {
             if (input.containsKey("url")) {
@@ -136,7 +130,6 @@ public class TaskExecutionActivitiesImpl implements DynamicActivity {
             String taskName,
             String taskRefName,
             Map<String, Object> input) {
-        // Mock transform task - wrap input in transformed structure
         Map<String, Object> transformed = new HashMap<>();
         transformed.put("original", input != null ? input : Collections.emptyMap());
         transformed.put("transformed", true);
@@ -150,7 +143,6 @@ public class TaskExecutionActivitiesImpl implements DynamicActivity {
             String taskName,
             String taskRefName,
             Map<String, Object> input) {
-        // Intentionally failing task for testing error handling
         boolean shouldFail = true;
         if (input != null && input.containsKey("shouldFail")) {
             Object shouldFailValue = input.get("shouldFail");
@@ -177,7 +169,6 @@ public class TaskExecutionActivitiesImpl implements DynamicActivity {
             String taskName,
             String taskRefName,
             Map<String, Object> input) {
-        // Slow task for testing timeouts
         long delayMs = 1000L;
         if (input != null && input.containsKey("delayMs")) {
             Object delayValue = input.get("delayMs");

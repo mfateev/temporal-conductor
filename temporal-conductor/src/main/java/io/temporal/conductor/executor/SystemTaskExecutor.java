@@ -53,7 +53,6 @@ public class SystemTaskExecutor {
 
     private static final Logger logger = LoggerFactory.getLogger(SystemTaskExecutor.class);
 
-    // Task types that are handled by system tasks
     private static final Set<String> SYSTEM_TASK_TYPES = new HashSet<>();
 
     static {
@@ -109,7 +108,6 @@ public class SystemTaskExecutor {
         this.inMemoryExecutionDaoFacade = new InMemoryExecutionDAOFacade(objectMapper);
         ParametersUtils parametersUtils = new ParametersUtils(objectMapper);
 
-        // Register system tasks using Conductor's native implementations
         this.systemTasks = new HashMap<>();
         Fork fork = new Fork();
         systemTasks.put(TaskType.FORK_JOIN.name(), fork);
@@ -163,7 +161,6 @@ public class SystemTaskExecutor {
 
         WorkflowSystemTask systemTask = systemTaskRegistry.get(task.getTaskType());
 
-        // Enhanced logging for DO_WHILE debugging
         if (TaskType.DO_WHILE.name().equals(task.getTaskType())) {
             logger.info("DO_WHILE execute: task={}, status={}, iteration={}, workflowTask={}",
                     task.getReferenceTaskName(), task.getStatus(), task.getIteration(),
@@ -173,20 +170,16 @@ public class SystemTaskExecutor {
                     task.getReferenceTaskName(), task.getTaskType());
         }
 
-        // Call start() first if task is SCHEDULED
         if (task.getStatus() == TaskModel.Status.SCHEDULED) {
             systemTask.start(workflow, task, inMemoryWorkflowExecutor);
-            // Set to IN_PROGRESS if start() didn't change status
             if (task.getStatus() == TaskModel.Status.SCHEDULED) {
                 task.setStatus(TaskModel.Status.IN_PROGRESS);
             }
         }
 
-        // Call execute() if task is not terminal
         if (!task.getStatus().isTerminal()) {
             boolean statusChanged = systemTask.execute(workflow, task, inMemoryWorkflowExecutor);
 
-            // Enhanced logging for DO_WHILE debugging
             if (TaskType.DO_WHILE.name().equals(task.getTaskType())) {
                 logger.info("DO_WHILE after execute: task={}, statusChanged={}, status={}, iteration={}, outputData={}",
                         task.getReferenceTaskName(), statusChanged, task.getStatus(),
