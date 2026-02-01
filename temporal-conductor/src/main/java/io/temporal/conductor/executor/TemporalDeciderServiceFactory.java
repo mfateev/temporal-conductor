@@ -21,10 +21,13 @@ import com.netflix.conductor.common.metadata.tasks.TaskType;
 import com.netflix.conductor.core.config.ConductorProperties;
 import com.netflix.conductor.core.execution.DeciderService;
 import com.netflix.conductor.core.execution.mapper.DoWhileTaskMapper;
+import com.netflix.conductor.core.execution.mapper.DynamicTaskMapper;
+import com.netflix.conductor.core.execution.mapper.ForkJoinDynamicTaskMapper;
 import com.netflix.conductor.core.execution.mapper.ForkJoinTaskMapper;
 import com.netflix.conductor.core.execution.mapper.JoinTaskMapper;
 import com.netflix.conductor.core.execution.mapper.SetVariableTaskMapper;
 import com.netflix.conductor.core.execution.mapper.SimpleTaskMapper;
+import com.netflix.conductor.core.execution.mapper.SubWorkflowTaskMapper;
 import com.netflix.conductor.core.execution.mapper.TaskMapper;
 import com.netflix.conductor.core.execution.mapper.TerminateTaskMapper;
 import com.netflix.conductor.core.execution.mapper.UserDefinedTaskMapper;
@@ -112,7 +115,7 @@ public class TemporalDeciderServiceFactory {
         );
 
         SystemTaskRegistry systemTaskRegistry = new SystemTaskRegistry(Collections.emptySet());
-        Map<String, TaskMapper> taskMappers = createTaskMappers(parametersUtils);
+        Map<String, TaskMapper> taskMappers = createTaskMappers(idGenerator, parametersUtils, systemTaskRegistry);
 
         return new DeciderService(
                 idGenerator,
@@ -125,7 +128,10 @@ public class TemporalDeciderServiceFactory {
         );
     }
 
-    private Map<String, TaskMapper> createTaskMappers(ParametersUtils parametersUtils) {
+    private Map<String, TaskMapper> createTaskMappers(
+            TemporalIdGenerator idGenerator,
+            ParametersUtils parametersUtils,
+            SystemTaskRegistry systemTaskRegistry) {
         Map<String, TaskMapper> mappers = new HashMap<>();
 
         SimpleTaskMapper simpleMapper = new SimpleTaskMapper(parametersUtils);
@@ -152,6 +158,16 @@ public class TemporalDeciderServiceFactory {
 
         TerminateTaskMapper terminateMapper = new TerminateTaskMapper(parametersUtils);
         mappers.put(TaskType.TERMINATE.name(), terminateMapper);
+
+        SubWorkflowTaskMapper subWorkflowMapper = new SubWorkflowTaskMapper(parametersUtils, metadataDao);
+        mappers.put(TaskType.SUB_WORKFLOW.name(), subWorkflowMapper);
+
+        DynamicTaskMapper dynamicMapper = new DynamicTaskMapper(parametersUtils, metadataDao);
+        mappers.put(TaskType.DYNAMIC.name(), dynamicMapper);
+
+        ForkJoinDynamicTaskMapper forkJoinDynamicMapper =
+                new ForkJoinDynamicTaskMapper(idGenerator, parametersUtils, objectMapper, metadataDao, systemTaskRegistry);
+        mappers.put(TaskType.FORK_JOIN_DYNAMIC.name(), forkJoinDynamicMapper);
 
         return mappers;
     }

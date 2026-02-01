@@ -20,6 +20,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.netflix.conductor.common.metadata.tasks.Task;
 import com.netflix.conductor.common.metadata.tasks.TaskDef;
+import com.netflix.conductor.common.metadata.tasks.TaskType;
 import com.netflix.conductor.common.metadata.workflow.WorkflowDef;
 import com.netflix.conductor.common.metadata.workflow.WorkflowTask;
 import io.temporal.api.common.v1.WorkflowExecution;
@@ -116,13 +117,17 @@ public class TemporalWorkflowService implements WorkflowService {
                         "Workflow definition not found: " + request.getName());
             }
 
-            Map<String, String> taskDefsJson = buildTaskDefsJson(workflowDef);
+            Map<String, Object> workflowInput = request.getInput() != null
+                    ? request.getInput() : Collections.emptyMap();
+            Map<String, String> taskDefsJson = buildTaskDefsJson(workflowDef, workflowInput);
+            Map<String, String> workflowDefsJson = buildWorkflowDefsJson(workflowDef);
 
             ConductorWorkflowInput input = ConductorWorkflowInput.builder()
                     .workflowDefJson(OBJECT_MAPPER.writeValueAsString(workflowDef))
                     .workflowInput(request.getInput() != null
                             ? request.getInput() : Collections.emptyMap())
                     .taskDefsJson(taskDefsJson)
+                    .workflowDefsJson(workflowDefsJson)
                     .correlationId(request.getCorrelationId())
                     .priority(request.getPriority())
                     .createdBy(request.getCreatedBy())
@@ -412,10 +417,19 @@ public class TemporalWorkflowService implements WorkflowService {
         }
     }
 
-    private Map<String, String> buildTaskDefsJson(WorkflowDef workflowDef) {
+    private Map<String, String> buildTaskDefsJson(WorkflowDef workflowDef,
+            Map<String, Object> workflowInput) {
         Map<String, String> taskDefsJson = new HashMap<>();
+        java.util.Set<String> visitedWorkflows = new HashSet<>();
 
-        collectTaskNames(workflowDef.getTasks()).forEach(taskName -> {
+        // Collect task names from main workflow and all sub-workflows
+        java.util.Set<String> allTaskNames = new HashSet<>();
+        collectAllTaskNames(workflowDef, allTaskNames, visitedWorkflows);
+
+        // Also collect task names from workflow input (for FORK_JOIN_DYNAMIC with dynamicForkTasksParam)
+        collectTaskNamesFromWorkflowInput(workflowInput, allTaskNames);
+
+        allTaskNames.forEach(taskName -> {
             TaskDef taskDef = metadataService.getTaskDef(taskName);
             if (taskDef != null) {
                 try {
@@ -437,6 +451,91 @@ public class TemporalWorkflowService implements WorkflowService {
         return taskDefsJson;
     }
 
+    /**
+     * Collect all task names from a workflow and its sub-workflows recursively.
+     */
+    private void collectAllTaskNames(WorkflowDef workflowDef, java.util.Set<String> taskNames,
+            java.util.Set<String> visitedWorkflows) {
+        String key = workflowDef.getName() + ":" + workflowDef.getVersion();
+        if (visitedWorkflows.contains(key)) {
+            return;
+        }
+        visitedWorkflows.add(key);
+
+        // Collect task names from this workflow
+        taskNames.addAll(collectTaskNames(workflowDef.getTasks()));
+
+        // Recursively collect from sub-workflows
+        collectTaskNamesFromSubWorkflows(workflowDef.getTasks(), taskNames, visitedWorkflows);
+    }
+
+    /**
+     * Recursively traverse tasks to find SUB_WORKFLOW tasks and collect their task names.
+     */
+    private void collectTaskNamesFromSubWorkflows(List<WorkflowTask> tasks,
+            java.util.Set<String> taskNames, java.util.Set<String> visitedWorkflows) {
+        if (tasks == null) {
+            return;
+        }
+
+        for (WorkflowTask task : tasks) {
+            if ("SUB_WORKFLOW".equals(task.getType())) {
+                com.netflix.conductor.common.metadata.workflow.SubWorkflowParams subParams =
+                        task.getSubWorkflowParam();
+                if (subParams != null) {
+                    WorkflowDef subDef = resolveSubWorkflowDef(subParams);
+                    if (subDef != null) {
+                        collectAllTaskNames(subDef, taskNames, visitedWorkflows);
+                    }
+                }
+            }
+
+            // Recurse into nested structures
+            if (task.getDecisionCases() != null) {
+                for (List<WorkflowTask> caseTasks : task.getDecisionCases().values()) {
+                    collectTaskNamesFromSubWorkflows(caseTasks, taskNames, visitedWorkflows);
+                }
+            }
+            collectTaskNamesFromSubWorkflows(task.getDefaultCase(), taskNames, visitedWorkflows);
+
+            if (task.getForkTasks() != null) {
+                for (List<WorkflowTask> forkBranch : task.getForkTasks()) {
+                    collectTaskNamesFromSubWorkflows(forkBranch, taskNames, visitedWorkflows);
+                }
+            }
+
+            collectTaskNamesFromSubWorkflows(task.getLoopOver(), taskNames, visitedWorkflows);
+        }
+    }
+
+    /**
+     * Resolve a sub-workflow definition from SubWorkflowParams.
+     */
+    private WorkflowDef resolveSubWorkflowDef(
+            com.netflix.conductor.common.metadata.workflow.SubWorkflowParams subParams) {
+        Object workflowDefObj = subParams.getWorkflowDefinition();
+        if (workflowDefObj != null) {
+            if (workflowDefObj instanceof WorkflowDef) {
+                return (WorkflowDef) workflowDefObj;
+            } else {
+                try {
+                    String json = OBJECT_MAPPER.writeValueAsString(workflowDefObj);
+                    return OBJECT_MAPPER.readValue(json, WorkflowDef.class);
+                } catch (JsonProcessingException e) {
+                    logger.warn("Failed to convert inline workflow definition", e);
+                    return null;
+                }
+            }
+        } else if (subParams.getName() != null) {
+            String name = subParams.getName();
+            Integer version = subParams.getVersion();
+            return version != null && version > 0
+                    ? metadataService.getWorkflowDef(name, version)
+                    : metadataService.getLatestWorkflowDef(name);
+        }
+        return null;
+    }
+
     private List<String> collectTaskNames(
             List<com.netflix.conductor.common.metadata.workflow.WorkflowTask> tasks) {
         List<String> names = new ArrayList<>();
@@ -447,6 +546,17 @@ public class TemporalWorkflowService implements WorkflowService {
         for (com.netflix.conductor.common.metadata.workflow.WorkflowTask task : tasks) {
             if (task.getName() != null) {
                 names.add(task.getName());
+            }
+
+            // Handle FORK_JOIN_DYNAMIC: extract forkTaskName from input parameters
+            if (TaskType.FORK_JOIN_DYNAMIC.name().equals(task.getType())) {
+                Map<String, Object> inputParams = task.getInputParameters();
+                if (inputParams != null) {
+                    Object forkTaskName = inputParams.get("forkTaskName");
+                    if (forkTaskName instanceof String) {
+                        names.add((String) forkTaskName);
+                    }
+                }
             }
 
             if (task.getDecisionCases() != null) {
@@ -468,6 +578,143 @@ public class TemporalWorkflowService implements WorkflowService {
         }
 
         return names;
+    }
+
+    /**
+     * Collect task names from workflow input for FORK_JOIN_DYNAMIC with dynamicForkTasksParam.
+     * This handles the case where task definitions are passed in the workflow input at runtime.
+     */
+    @SuppressWarnings("unchecked")
+    private void collectTaskNamesFromWorkflowInput(Map<String, Object> workflowInput,
+            java.util.Set<String> taskNames) {
+        if (workflowInput == null) {
+            return;
+        }
+
+        // Look for dynamicTasks array in workflow input
+        // This is used by FORK_JOIN_DYNAMIC with dynamicForkTasksParam
+        for (Object value : workflowInput.values()) {
+            if (value instanceof List) {
+                List<?> list = (List<?>) value;
+                for (Object item : list) {
+                    if (item instanceof Map) {
+                        Map<String, Object> taskDef = (Map<String, Object>) item;
+                        // Check if this looks like a task definition (has name and type)
+                        Object name = taskDef.get("name");
+                        Object type = taskDef.get("type");
+                        if (name instanceof String && type != null) {
+                            taskNames.add((String) name);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Recursively collect all sub-workflow definitions referenced by the workflow.
+     * Returns a map of "name:version" -> workflow definition JSON.
+     */
+    private Map<String, String> buildWorkflowDefsJson(WorkflowDef workflowDef) {
+        Map<String, String> workflowDefsJson = new HashMap<>();
+        java.util.Set<String> visited = new HashSet<>();
+
+        // Recursively collect sub-workflow definitions
+        collectSubWorkflowDefs(workflowDef.getTasks(), workflowDefsJson, visited);
+
+        return workflowDefsJson;
+    }
+
+    private void collectSubWorkflowDefs(
+            List<WorkflowTask> tasks,
+            Map<String, String> workflowDefsJson,
+            java.util.Set<String> visited) {
+
+        if (tasks == null) {
+            return;
+        }
+
+        for (WorkflowTask task : tasks) {
+            // Handle SUB_WORKFLOW tasks
+            if ("SUB_WORKFLOW".equals(task.getType())) {
+                com.netflix.conductor.common.metadata.workflow.SubWorkflowParams subParams =
+                        task.getSubWorkflowParam();
+
+                if (subParams != null) {
+                    // Check if inline definition is provided
+                    Object workflowDefObj = subParams.getWorkflowDefinition();
+                    if (workflowDefObj != null) {
+                        // Inline definition - convert and add it
+                        WorkflowDef inlineDef;
+                        if (workflowDefObj instanceof WorkflowDef) {
+                            inlineDef = (WorkflowDef) workflowDefObj;
+                        } else {
+                            // Convert from Map to WorkflowDef
+                            try {
+                                String json = OBJECT_MAPPER.writeValueAsString(workflowDefObj);
+                                inlineDef = OBJECT_MAPPER.readValue(json, WorkflowDef.class);
+                            } catch (JsonProcessingException e) {
+                                logger.warn("Failed to convert inline workflow definition", e);
+                                continue;
+                            }
+                        }
+                        String key = inlineDef.getName() + ":" + inlineDef.getVersion();
+                        if (!visited.contains(key)) {
+                            visited.add(key);
+                            try {
+                                workflowDefsJson.put(key, OBJECT_MAPPER.writeValueAsString(inlineDef));
+                            } catch (JsonProcessingException e) {
+                                logger.warn("Failed to serialize inline workflow definition: {}", key);
+                            }
+                            // Recurse into inline workflow
+                            collectSubWorkflowDefs(inlineDef.getTasks(), workflowDefsJson, visited);
+                        }
+                    } else if (subParams.getName() != null) {
+                        // Referenced workflow - look it up
+                        String name = subParams.getName();
+                        Integer version = subParams.getVersion();
+                        String key = name + ":" + (version != null ? version : 0);
+
+                        if (!visited.contains(key)) {
+                            visited.add(key);
+                            WorkflowDef subDef = version != null && version > 0
+                                    ? metadataService.getWorkflowDef(name, version)
+                                    : metadataService.getLatestWorkflowDef(name);
+
+                            if (subDef != null) {
+                                String actualKey = subDef.getName() + ":" + subDef.getVersion();
+                                try {
+                                    workflowDefsJson.put(actualKey, OBJECT_MAPPER.writeValueAsString(subDef));
+                                } catch (JsonProcessingException e) {
+                                    logger.warn("Failed to serialize sub-workflow definition: {}", actualKey);
+                                }
+                                // Recurse into referenced sub-workflow
+                                collectSubWorkflowDefs(subDef.getTasks(), workflowDefsJson, visited);
+                            } else {
+                                logger.warn("Sub-workflow definition not found: {} version {}",
+                                        name, version);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Recurse into nested structures
+            if (task.getDecisionCases() != null) {
+                for (List<WorkflowTask> caseTasks : task.getDecisionCases().values()) {
+                    collectSubWorkflowDefs(caseTasks, workflowDefsJson, visited);
+                }
+            }
+            collectSubWorkflowDefs(task.getDefaultCase(), workflowDefsJson, visited);
+
+            if (task.getForkTasks() != null) {
+                for (List<WorkflowTask> forkBranch : task.getForkTasks()) {
+                    collectSubWorkflowDefs(forkBranch, workflowDefsJson, visited);
+                }
+            }
+
+            collectSubWorkflowDefs(task.getLoopOver(), workflowDefsJson, visited);
+        }
     }
 
     private Workflow convertToWorkflow(

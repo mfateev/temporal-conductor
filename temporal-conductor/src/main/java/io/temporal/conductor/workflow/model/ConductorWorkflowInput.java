@@ -33,6 +33,8 @@ public class ConductorWorkflowInput {
     private String workflowDefJson = "";
     private Map<String, Object> workflowInput = Collections.emptyMap();
     private Map<String, String> taskDefsJson = Collections.emptyMap();
+    // Additional workflow definitions for SUB_WORKFLOW tasks (keyed by "name:version")
+    private Map<String, String> workflowDefsJson = Collections.emptyMap();
 
     // Metadata for search attributes
     private String correlationId;
@@ -59,6 +61,10 @@ public class ConductorWorkflowInput {
 
     public Map<String, String> getTaskDefsJson() {
         return taskDefsJson;
+    }
+
+    public Map<String, String> getWorkflowDefsJson() {
+        return workflowDefsJson;
     }
 
     public String getCorrelationId() {
@@ -96,6 +102,10 @@ public class ConductorWorkflowInput {
 
     public void setTaskDefsJson(Map<String, String> taskDefsJson) {
         this.taskDefsJson = taskDefsJson;
+    }
+
+    public void setWorkflowDefsJson(Map<String, String> workflowDefsJson) {
+        this.workflowDefsJson = workflowDefsJson;
     }
 
     public void setCorrelationId(String correlationId) {
@@ -147,6 +157,11 @@ public class ConductorWorkflowInput {
 
         public Builder taskDefsJson(Map<String, String> taskDefsJson) {
             input.taskDefsJson = taskDefsJson;
+            return this;
+        }
+
+        public Builder workflowDefsJson(Map<String, String> workflowDefsJson) {
+            input.workflowDefsJson = workflowDefsJson;
             return this;
         }
 

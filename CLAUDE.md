@@ -134,3 +134,54 @@ See `design/` directory:
 ```bash
 git push origin <branch>
 ```
+
+## Troubleshooting E2E Tests
+
+**Always use Temporal CLI first** to troubleshoot E2E test failures before diving into code. The Temporal CLI provides direct access to workflow history and state.
+
+```bash
+# List recent workflows in the conductor namespace
+temporal workflow list --namespace conductor
+
+# Get workflow details and history
+temporal workflow show --workflow-id <workflow-id> --namespace conductor
+
+# Get workflow history in JSON (for detailed analysis)
+temporal workflow show --workflow-id <workflow-id> --namespace conductor --output json
+
+# Describe workflow execution
+temporal workflow describe --workflow-id <workflow-id> --namespace conductor
+```
+
+Key things to look for:
+1. **Workflow status** - COMPLETED, FAILED, TERMINATED, TIMED_OUT
+2. **Activity failures** - Check ActivityTaskFailed events for error messages
+3. **Workflow task failures** - Non-determinism issues show as WorkflowTaskFailed
+4. **Event sequence** - Verify activities scheduled and completed in expected order
+
+The E2E tests run against Docker Compose containers. The Temporal server is exposed on port 7233.
+
+## Consulting External Source Code
+
+**NEVER unzip JAR files** to inspect source code from dependencies. Instead:
+
+1. Clone the repository to the shared `repos/` directory
+2. Create a worktree in the task folder if needed
+3. Read the source code directly from the cloned repository
+
+Example for Netflix Conductor:
+```bash
+# Clone to shared repos (if not already done)
+cd /Users/maxim/workarea/repos
+git clone https://github.com/conductor-oss/conductor.git
+
+# Create worktree in task folder (optional, for specific branch/tag)
+cd /Users/maxim/workarea/repos/conductor
+git worktree add /path/to/task/conductor-ref <branch-or-tag>
+```
+
+This approach:
+- Provides full source with history and context
+- Allows navigation between related files
+- Enables searching across the entire codebase
+- Maintains consistency with the workarea workflow

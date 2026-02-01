@@ -31,6 +31,8 @@ import com.netflix.conductor.model.WorkflowModel;
 import io.temporal.activity.ActivityOptions;
 import io.temporal.common.RetryOptions;
 import io.temporal.workflow.ActivityStub;
+import io.temporal.workflow.ChildWorkflowOptions;
+import io.temporal.workflow.ChildWorkflowStub;
 import io.temporal.conductor.executor.DeterministicIdGenerator;
 import io.temporal.conductor.executor.InMemoryMetadataDAO;
 import io.temporal.conductor.executor.SystemTaskExecutor;
@@ -94,6 +96,7 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
     private volatile boolean stateUpdated = false;
     private final Set<String> pendingActivityTaskIds = new HashSet<>();
     private final Set<String> pendingTimerTaskRefs = new HashSet<>();
+    private final Set<String> pendingChildWorkflowTaskIds = new HashSet<>();
 
     private WorkflowModel workflowModel;
     private DeciderService deciderService;
@@ -176,9 +179,27 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
         for (Map.Entry<String, String> entry : input.getTaskDefsJson().entrySet()) {
             try {
                 TaskDef taskDef = objectMapper.readValue(entry.getValue(), TaskDef.class);
+                // Disable Conductor-level timeouts since Temporal handles timeouts
+                taskDef.setTimeoutSeconds(0);
+                taskDef.setPollTimeoutSeconds(0);
+                taskDef.setResponseTimeoutSeconds(0);
                 metadataDao.createTaskDef(taskDef);
             } catch (JsonProcessingException e) {
                 throw new RuntimeException("Failed to parse task definition: " + entry.getKey(), e);
+            }
+        }
+
+        // Register sub-workflow definitions for SUB_WORKFLOW tasks
+        if (input.getWorkflowDefsJson() != null) {
+            for (Map.Entry<String, String> entry : input.getWorkflowDefsJson().entrySet()) {
+                try {
+                    WorkflowDef subWorkflowDef = objectMapper.readValue(entry.getValue(), WorkflowDef.class);
+                    metadataDao.createWorkflowDef(subWorkflowDef);
+                    logger.debug("Registered sub-workflow definition: {} version {}",
+                            subWorkflowDef.getName(), subWorkflowDef.getVersion());
+                } catch (JsonProcessingException e) {
+                    logger.warn("Failed to parse sub-workflow definition: {}", entry.getKey(), e);
+                }
             }
         }
 
@@ -377,7 +398,8 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
                 .anyMatch(t -> t.getStatus() == TaskModel.Status.IN_PROGRESS
                         && isSystemTask(t)
                         && !TaskType.WAIT.name().equals(t.getTaskType())
-                        && !TaskType.JOIN.name().equals(t.getTaskType()));
+                        && !TaskType.JOIN.name().equals(t.getTaskType())
+                        && !TaskType.SUB_WORKFLOW.name().equals(t.getTaskType()));
 
         // Log detailed task state for debugging
         if (logger.isDebugEnabled()) {
@@ -386,9 +408,9 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
                     .map(t -> t.getReferenceTaskName() + "(" + t.getTaskType() + ")")
                     .collect(Collectors.toList());
             logger.debug("waitForSignalsOrChanges: hasScheduledTasks={}, hasProgressableSystemTasks={}, " +
-                    "inProgressSystemTasks={}, pendingActivities={}, pendingTimers={}",
+                    "inProgressSystemTasks={}, pendingActivities={}, pendingTimers={}, pendingChildWorkflows={}",
                     hasScheduledTasks, hasProgressableSystemTasks, inProgressSystemTasks,
-                    pendingActivityTaskIds.size(), pendingTimerTaskRefs.size());
+                    pendingActivityTaskIds.size(), pendingTimerTaskRefs.size(), pendingChildWorkflowTaskIds.size());
         }
 
         // If there are scheduled tasks or progressable system tasks, don't wait
@@ -404,17 +426,18 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
         boolean hasInProgressWaitingTasks = workflowModel.getTasks().stream()
                 .anyMatch(t -> t.getStatus() == TaskModel.Status.IN_PROGRESS);
 
-        // If there are no pending activities, timers, signals, AND no IN_PROGRESS tasks,
+        // If there are no pending activities, timers, child workflows, signals, AND no IN_PROGRESS tasks,
         // don't wait - just return and let the scheduling loop continue
         if (pendingActivityTaskIds.isEmpty() && pendingTimerTaskRefs.isEmpty()
+                && pendingChildWorkflowTaskIds.isEmpty()
                 && pendingSignals.isEmpty() && !hasInProgressWaitingTasks) {
             logger.debug("No pending work to wait for, continuing to next iteration");
             return;
         }
 
-        logger.debug("Waiting for events... (activities: {}, timers: {}, signals: {}, inProgress: {})",
+        logger.debug("Waiting for events... (activities: {}, timers: {}, childWorkflows: {}, signals: {}, inProgress: {})",
                 pendingActivityTaskIds.size(), pendingTimerTaskRefs.size(),
-                pendingSignals.size(), hasInProgressWaitingTasks);
+                pendingChildWorkflowTaskIds.size(), pendingSignals.size(), hasInProgressWaitingTasks);
 
         // Reset state flag before waiting
         stateUpdated = false;
@@ -518,6 +541,11 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
 
         if (TaskType.WAIT.name().equals(task.getTaskType())) {
             executeWaitTask(task);
+            return;
+        }
+
+        if (TaskType.SUB_WORKFLOW.name().equals(task.getTaskType())) {
+            executeSubWorkflowTask(task);
             return;
         }
 
@@ -674,6 +702,175 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
     }
 
     /**
+     * Execute SUB_WORKFLOW task by starting a child workflow.
+     * The child workflow executes the sub-workflow definition and its completion
+     * is handled asynchronously via Promise.handle callback.
+     */
+    @SuppressWarnings("unchecked")
+    private void executeSubWorkflowTask(TaskModel task) {
+        String taskRefName = task.getReferenceTaskName();
+        String taskId = task.getTaskId();
+
+        if (task.getStatus() == TaskModel.Status.SCHEDULED) {
+            task.setStatus(TaskModel.Status.IN_PROGRESS);
+            task.setStartTime(Workflow.currentTimeMillis());
+        }
+
+        // If child workflow already started, nothing more to do - callback will complete it
+        if (pendingChildWorkflowTaskIds.contains(taskId)) {
+            return;
+        }
+
+        Map<String, Object> inputData = task.getInputData();
+        if (inputData == null) {
+            task.setStatus(TaskModel.Status.FAILED);
+            task.setReasonForIncompletion("SUB_WORKFLOW task has no input data");
+            task.setEndTime(Workflow.currentTimeMillis());
+            return;
+        }
+
+        // Extract sub-workflow parameters from task input
+        String subWorkflowName = (String) inputData.get("subWorkflowName");
+        Integer subWorkflowVersion = inputData.get("subWorkflowVersion") != null
+                ? ((Number) inputData.get("subWorkflowVersion")).intValue() : null;
+        Object subWorkflowDefinitionObj = inputData.get("subWorkflowDefinition");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> subWorkflowInput = (Map<String, Object>) inputData.get("workflowInput");
+
+        if (subWorkflowInput == null) {
+            subWorkflowInput = Collections.emptyMap();
+        }
+
+        // Resolve the sub-workflow definition
+        WorkflowDef subWorkflowDef = null;
+        if (subWorkflowDefinitionObj != null) {
+            // Inline workflow definition provided - can be WorkflowDef or Map
+            if (subWorkflowDefinitionObj instanceof WorkflowDef) {
+                subWorkflowDef = (WorkflowDef) subWorkflowDefinitionObj;
+            } else if (subWorkflowDefinitionObj instanceof Map) {
+                try {
+                    String defJson = objectMapper.writeValueAsString(subWorkflowDefinitionObj);
+                    subWorkflowDef = objectMapper.readValue(defJson, WorkflowDef.class);
+                } catch (JsonProcessingException e) {
+                    task.setStatus(TaskModel.Status.FAILED);
+                    task.setReasonForIncompletion("Failed to parse inline subWorkflowDefinition: " + e.getMessage());
+                    task.setEndTime(Workflow.currentTimeMillis());
+                    return;
+                }
+            } else {
+                task.setStatus(TaskModel.Status.FAILED);
+                task.setReasonForIncompletion("Invalid subWorkflowDefinition type: " + subWorkflowDefinitionObj.getClass().getName());
+                task.setEndTime(Workflow.currentTimeMillis());
+                return;
+            }
+        } else if (subWorkflowName != null) {
+            // Look up workflow definition from metadata
+            Optional<WorkflowDef> defOpt = subWorkflowVersion != null
+                    ? metadataDao.getWorkflowDef(subWorkflowName, subWorkflowVersion)
+                    : metadataDao.getLatestWorkflowDef(subWorkflowName);
+
+            if (defOpt.isEmpty()) {
+                task.setStatus(TaskModel.Status.FAILED);
+                task.setReasonForIncompletion("Sub-workflow definition not found: " + subWorkflowName
+                        + (subWorkflowVersion != null ? " version " + subWorkflowVersion : ""));
+                task.setEndTime(Workflow.currentTimeMillis());
+                return;
+            }
+            subWorkflowDef = defOpt.get();
+        } else {
+            task.setStatus(TaskModel.Status.FAILED);
+            task.setReasonForIncompletion("SUB_WORKFLOW task requires either subWorkflowName or subWorkflowDefinition");
+            task.setEndTime(Workflow.currentTimeMillis());
+            return;
+        }
+
+        // Build child workflow input
+        String subWorkflowDefJson;
+        try {
+            subWorkflowDefJson = objectMapper.writeValueAsString(subWorkflowDef);
+        } catch (JsonProcessingException e) {
+            task.setStatus(TaskModel.Status.FAILED);
+            task.setReasonForIncompletion("Failed to serialize sub-workflow definition: " + e.getMessage());
+            task.setEndTime(Workflow.currentTimeMillis());
+            return;
+        }
+
+        ConductorWorkflowInput childInput = ConductorWorkflowInput.builder()
+                .workflowDefJson(subWorkflowDefJson)
+                .workflowInput(subWorkflowInput)
+                .taskDefsJson(workflowInput.getTaskDefsJson())
+                .workflowDefsJson(workflowInput.getWorkflowDefsJson())
+                .correlationId(workflowInput.getCorrelationId())
+                .build();
+
+        // Generate child workflow ID: parentWorkflowId-taskRefName
+        String childWorkflowId = Workflow.getInfo().getWorkflowId() + "-" + taskRefName;
+
+        // Create child workflow options
+        ChildWorkflowOptions options = ChildWorkflowOptions.newBuilder()
+                .setWorkflowId(childWorkflowId)
+                .setTaskQueue(Workflow.getInfo().getTaskQueue())
+                .build();
+
+        // Start child workflow asynchronously
+        // Use the Conductor workflow name as the Temporal workflow type (same pattern as parent workflow)
+        String childWorkflowType = subWorkflowDef.getName();
+        ChildWorkflowStub childStub = Workflow.newUntypedChildWorkflowStub(childWorkflowType, options);
+        Promise<ConductorWorkflowOutput> promise = childStub.executeAsync(
+                ConductorWorkflowOutput.class, childInput);
+
+        pendingChildWorkflowTaskIds.add(taskId);
+        logger.info("Started child workflow {} for SUB_WORKFLOW task {}", childWorkflowId, taskRefName);
+
+        // Event-driven completion via Promise.handle callback
+        promise.handle((result, failure) -> {
+            handleChildWorkflowCompletion(taskId, result, failure);
+            return null;
+        });
+    }
+
+    /**
+     * Handle child workflow completion - called by Promise.handle callback.
+     * Updates the SUB_WORKFLOW task state and sets stateUpdated flag to wake up main loop.
+     */
+    private void handleChildWorkflowCompletion(String taskId, ConductorWorkflowOutput result, Throwable failure) {
+        TaskModel task = getTaskById(taskId);
+        if (task == null) {
+            logger.warn("Child workflow completed but task not found: {}", taskId);
+            pendingChildWorkflowTaskIds.remove(taskId);
+            stateUpdated = true;
+            return;
+        }
+
+        if (failure != null) {
+            logger.debug("Child workflow failed for task {}: {}",
+                    task.getReferenceTaskName(), failure.getMessage());
+            task.setStatus(TaskModel.Status.FAILED);
+            task.setReasonForIncompletion(failure.getMessage());
+        } else if (result != null) {
+            task.setOutputData(result.getOutput() != null ? result.getOutput() : Collections.emptyMap());
+            if ("COMPLETED".equals(result.getStatus())) {
+                task.setStatus(TaskModel.Status.COMPLETED);
+                logger.debug("Child workflow completed successfully for task {}",
+                        task.getReferenceTaskName());
+            } else {
+                task.setStatus(TaskModel.Status.FAILED);
+                task.setReasonForIncompletion(result.getFailureReason() != null
+                        ? result.getFailureReason() : "Child workflow failed with status: " + result.getStatus());
+                logger.debug("Child workflow failed for task {}: status={}",
+                        task.getReferenceTaskName(), result.getStatus());
+            }
+        } else {
+            task.setStatus(TaskModel.Status.FAILED);
+            task.setReasonForIncompletion("Child workflow returned null result");
+        }
+
+        task.setEndTime(Workflow.currentTimeMillis());
+        pendingChildWorkflowTaskIds.remove(taskId);
+        stateUpdated = true;  // Signal main loop to wake up
+    }
+
+    /**
      * Re-evaluate IN_PROGRESS system tasks that may now be able to complete.
      */
     private void reEvaluateInProgressSystemTasks() {
@@ -755,11 +952,13 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
                 .anyMatch(t -> t.getStatus() == TaskModel.Status.SCHEDULED);
 
         // Check for IN_PROGRESS system tasks that should trigger more work
+        // Exclude WAIT, JOIN, and SUB_WORKFLOW as they wait for async completion
         boolean hasProgressableSystemTasks = workflowModel.getTasks().stream()
                 .anyMatch(t -> t.getStatus() == TaskModel.Status.IN_PROGRESS
                         && isSystemTask(t)
                         && !TaskType.WAIT.name().equals(t.getTaskType())
-                        && !TaskType.JOIN.name().equals(t.getTaskType()));
+                        && !TaskType.JOIN.name().equals(t.getTaskType())
+                        && !TaskType.SUB_WORKFLOW.name().equals(t.getTaskType()));
 
         if (iterations >= maxIterations && hasMoreScheduledTasks) {
             logger.info("executeNewlyScheduledTasks hit iteration limit ({}) with more tasks pending",
@@ -1262,6 +1461,7 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
 
     private boolean canContinueAsNew() {
         return pendingActivityTaskIds.isEmpty()
+                && pendingChildWorkflowTaskIds.isEmpty()
                 && !isPaused
                 && !workflowModel.getStatus().isTerminal();
     }

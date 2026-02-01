@@ -16,8 +16,8 @@ The project is a **functional POC** that executes Conductor workflows using Temp
 
 | Task Type | Description | Effort |
 |-----------|-------------|--------|
-| `SUB_WORKFLOW` | Child workflow execution | Medium - use Temporal child workflows |
-| `DYNAMIC` | Dynamic task name from input | Low - extend SimpleTaskMapper |
+| ~~`SUB_WORKFLOW`~~ | ~~Child workflow execution~~ | ~~IMPLEMENTED~~ |
+| ~~`DYNAMIC`~~ | ~~Dynamic task name from input~~ | ~~IMPLEMENTED~~ |
 | `FORK_JOIN_DYNAMIC` | Dynamic parallel execution | Medium - dynamic Promise.all |
 | `START_WORKFLOW` | Async workflow start (fire & forget) | Low - use signalWithStart |
 | `EVENT` | Publish/wait for events | Medium - Temporal signals |
@@ -147,7 +147,7 @@ The project is a **functional POC** that executes Conductor workflows using Temp
 
 | Category | Implemented | Missing | % Complete |
 |----------|-------------|---------|------------|
-| Task Types | 11/23 | 12 | 48% |
+| Task Types | 13/23 | 10 | 57% |
 | Security | 0/6 | 6 | 0% |
 | Monitoring | 1/6 | 5 | 17% |
 | Reliability | 2/6 | 4 | 33% |
