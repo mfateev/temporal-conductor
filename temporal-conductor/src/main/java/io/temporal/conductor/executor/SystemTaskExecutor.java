@@ -67,6 +67,7 @@ public class SystemTaskExecutor {
         SYSTEM_TASK_TYPES.add(TaskType.EXCLUSIVE_JOIN.name());
         SYSTEM_TASK_TYPES.add(TaskType.WAIT.name());
         SYSTEM_TASK_TYPES.add(TaskType.SUB_WORKFLOW.name());
+        SYSTEM_TASK_TYPES.add(TaskType.START_WORKFLOW.name());
     }
 
     private final InMemoryWorkflowExecutor inMemoryWorkflowExecutor;

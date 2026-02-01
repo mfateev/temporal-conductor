@@ -31,6 +31,7 @@ import com.netflix.conductor.model.WorkflowModel;
 import io.temporal.activity.ActivityOptions;
 import io.temporal.common.RetryOptions;
 import io.temporal.workflow.ActivityStub;
+import io.temporal.api.enums.v1.ParentClosePolicy;
 import io.temporal.workflow.ChildWorkflowOptions;
 import io.temporal.workflow.ChildWorkflowStub;
 import io.temporal.conductor.executor.DeterministicIdGenerator;
@@ -549,6 +550,11 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
             return;
         }
 
+        if (TaskType.START_WORKFLOW.name().equals(task.getTaskType())) {
+            executeStartWorkflowTask(task);
+            return;
+        }
+
         systemTaskExecutor.execute(workflowModel, task);
 
         if (task.getStatus().isTerminal() && task.getEndTime() == 0L) {
@@ -868,6 +874,126 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
         task.setEndTime(Workflow.currentTimeMillis());
         pendingChildWorkflowTaskIds.remove(taskId);
         stateUpdated = true;  // Signal main loop to wake up
+    }
+
+    /**
+     * Execute START_WORKFLOW task - fire-and-forget child workflow.
+     * Unlike SUB_WORKFLOW, this task completes immediately after starting the child workflow.
+     * The child workflow continues independently even if the parent completes or fails.
+     */
+    @SuppressWarnings("unchecked")
+    private void executeStartWorkflowTask(TaskModel task) {
+        String taskRefName = task.getReferenceTaskName();
+
+        if (task.getStatus() == TaskModel.Status.SCHEDULED) {
+            task.setStatus(TaskModel.Status.IN_PROGRESS);
+            task.setStartTime(Workflow.currentTimeMillis());
+        }
+
+        // START_WORKFLOW completes immediately - no tracking of child workflow
+        if (task.getStatus().isTerminal()) {
+            return;
+        }
+
+        Map<String, Object> inputData = task.getInputData();
+        if (inputData == null) {
+            task.setStatus(TaskModel.Status.FAILED);
+            task.setReasonForIncompletion("START_WORKFLOW task has no input data");
+            task.setEndTime(Workflow.currentTimeMillis());
+            return;
+        }
+
+        // Extract start workflow parameters from task input
+        // START_WORKFLOW uses "startWorkflow" nested object for configuration
+        @SuppressWarnings("unchecked")
+        Map<String, Object> startWorkflowConfig = (Map<String, Object>) inputData.get("startWorkflow");
+        if (startWorkflowConfig == null) {
+            // Fall back to direct parameters (alternative input format)
+            startWorkflowConfig = inputData;
+        }
+
+        String workflowName = (String) startWorkflowConfig.get("name");
+        Integer workflowVersion = startWorkflowConfig.get("version") != null
+                ? ((Number) startWorkflowConfig.get("version")).intValue() : null;
+        @SuppressWarnings("unchecked")
+        Map<String, Object> childWorkflowInput = (Map<String, Object>) startWorkflowConfig.get("input");
+        String correlationId = (String) startWorkflowConfig.get("correlationId");
+
+        if (workflowName == null) {
+            task.setStatus(TaskModel.Status.FAILED);
+            task.setReasonForIncompletion("START_WORKFLOW task requires 'name' parameter");
+            task.setEndTime(Workflow.currentTimeMillis());
+            return;
+        }
+
+        if (childWorkflowInput == null) {
+            childWorkflowInput = Collections.emptyMap();
+        }
+
+        // Look up workflow definition from metadata
+        Optional<WorkflowDef> defOpt = workflowVersion != null
+                ? metadataDao.getWorkflowDef(workflowName, workflowVersion)
+                : metadataDao.getLatestWorkflowDef(workflowName);
+
+        if (defOpt.isEmpty()) {
+            task.setStatus(TaskModel.Status.FAILED);
+            task.setReasonForIncompletion("Workflow definition not found: " + workflowName
+                    + (workflowVersion != null ? " version " + workflowVersion : ""));
+            task.setEndTime(Workflow.currentTimeMillis());
+            return;
+        }
+
+        WorkflowDef childWorkflowDef = defOpt.get();
+
+        // Build child workflow input
+        String childWorkflowDefJson;
+        try {
+            childWorkflowDefJson = objectMapper.writeValueAsString(childWorkflowDef);
+        } catch (JsonProcessingException e) {
+            task.setStatus(TaskModel.Status.FAILED);
+            task.setReasonForIncompletion("Failed to serialize workflow definition: " + e.getMessage());
+            task.setEndTime(Workflow.currentTimeMillis());
+            return;
+        }
+
+        ConductorWorkflowInput childInput = ConductorWorkflowInput.builder()
+                .workflowDefJson(childWorkflowDefJson)
+                .workflowInput(childWorkflowInput)
+                .taskDefsJson(workflowInput.getTaskDefsJson())
+                .workflowDefsJson(workflowInput.getWorkflowDefsJson())
+                .correlationId(correlationId != null ? correlationId : workflowInput.getCorrelationId())
+                .build();
+
+        // Generate child workflow ID: parentWorkflowId-taskRefName
+        String childWorkflowId = Workflow.getInfo().getWorkflowId() + "-" + taskRefName;
+
+        // Create child workflow options with ABANDON policy - fire-and-forget
+        // The child workflow will continue running even if parent completes or fails
+        ChildWorkflowOptions options = ChildWorkflowOptions.newBuilder()
+                .setWorkflowId(childWorkflowId)
+                .setTaskQueue(Workflow.getInfo().getTaskQueue())
+                .setParentClosePolicy(ParentClosePolicy.PARENT_CLOSE_POLICY_ABANDON)
+                .build();
+
+        // Start child workflow - fire and forget
+        String childWorkflowType = childWorkflowDef.getName();
+        ChildWorkflowStub childStub = Workflow.newUntypedChildWorkflowStub(childWorkflowType, options);
+
+        // Start the child workflow asynchronously but don't wait for result
+        // executeAsync returns a Promise but we intentionally don't track it
+        // since this is fire-and-forget (ParentClosePolicy.ABANDON ensures child continues)
+        childStub.executeAsync(ConductorWorkflowOutput.class, childInput);
+
+        logger.info("Started fire-and-forget child workflow {} for START_WORKFLOW task {}",
+                childWorkflowId, taskRefName);
+
+        // Complete the task immediately with the child workflow ID as output
+        Map<String, Object> outputData = new HashMap<>();
+        outputData.put("workflowId", childWorkflowId);
+        outputData.put("workflowType", childWorkflowType);
+        task.setOutputData(outputData);
+        task.setStatus(TaskModel.Status.COMPLETED);
+        task.setEndTime(Workflow.currentTimeMillis());
     }
 
     /**

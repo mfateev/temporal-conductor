@@ -490,6 +490,14 @@ public class TemporalWorkflowService implements WorkflowService {
                 }
             }
 
+            // Handle START_WORKFLOW tasks
+            if ("START_WORKFLOW".equals(task.getType())) {
+                WorkflowDef startWorkflowDef = resolveStartWorkflowDef(task);
+                if (startWorkflowDef != null) {
+                    collectAllTaskNames(startWorkflowDef, taskNames, visitedWorkflows);
+                }
+            }
+
             // Recurse into nested structures
             if (task.getDecisionCases() != null) {
                 for (List<WorkflowTask> caseTasks : task.getDecisionCases().values()) {
@@ -534,6 +542,56 @@ public class TemporalWorkflowService implements WorkflowService {
                     : metadataService.getLatestWorkflowDef(name);
         }
         return null;
+    }
+
+    /**
+     * Resolve a workflow definition from START_WORKFLOW task input parameters.
+     * START_WORKFLOW uses startWorkflow.name and startWorkflow.version for configuration.
+     */
+    @SuppressWarnings("unchecked")
+    private WorkflowDef resolveStartWorkflowDef(WorkflowTask task) {
+        Map<String, Object> inputParams = task.getInputParameters();
+        if (inputParams == null) {
+            return null;
+        }
+
+        // START_WORKFLOW uses "startWorkflow" nested object
+        Object startWorkflowObj = inputParams.get("startWorkflow");
+        Map<String, Object> startWorkflowConfig;
+        if (startWorkflowObj instanceof Map) {
+            startWorkflowConfig = (Map<String, Object>) startWorkflowObj;
+        } else {
+            // Fall back to direct parameters
+            startWorkflowConfig = inputParams;
+        }
+
+        Object nameObj = startWorkflowConfig.get("name");
+        Object versionObj = startWorkflowConfig.get("version");
+
+        // Skip if name is an expression (starts with $)
+        if (nameObj == null || !(nameObj instanceof String)) {
+            return null;
+        }
+        String name = (String) nameObj;
+        if (name.startsWith("${")) {
+            // Dynamic name - can't resolve at definition time
+            return null;
+        }
+
+        Integer version = null;
+        if (versionObj instanceof Number) {
+            version = ((Number) versionObj).intValue();
+        } else if (versionObj instanceof String && !((String) versionObj).startsWith("${")) {
+            try {
+                version = Integer.parseInt((String) versionObj);
+            } catch (NumberFormatException e) {
+                // Ignore parse errors
+            }
+        }
+
+        return version != null && version > 0
+                ? metadataService.getWorkflowDef(name, version)
+                : metadataService.getLatestWorkflowDef(name);
     }
 
     private List<String> collectTaskNames(
@@ -695,6 +753,24 @@ public class TemporalWorkflowService implements WorkflowService {
                                         name, version);
                             }
                         }
+                    }
+                }
+            }
+
+            // Handle START_WORKFLOW tasks
+            if ("START_WORKFLOW".equals(task.getType())) {
+                WorkflowDef startDef = resolveStartWorkflowDef(task);
+                if (startDef != null) {
+                    String key = startDef.getName() + ":" + startDef.getVersion();
+                    if (!visited.contains(key)) {
+                        visited.add(key);
+                        try {
+                            workflowDefsJson.put(key, OBJECT_MAPPER.writeValueAsString(startDef));
+                        } catch (JsonProcessingException e) {
+                            logger.warn("Failed to serialize START_WORKFLOW definition: {}", key);
+                        }
+                        // Recurse into the started workflow
+                        collectSubWorkflowDefs(startDef.getTasks(), workflowDefsJson, visited);
                     }
                 }
             }
