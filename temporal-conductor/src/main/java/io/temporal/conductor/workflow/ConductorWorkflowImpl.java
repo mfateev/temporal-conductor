@@ -1344,10 +1344,12 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
         String activityType = task.getTaskDefName();
         String taskId = task.getTaskId();
 
+        // Pass: taskRefName, conductorTaskType, inputData
         Promise<TaskExecutionResult> promise = activityStub.executeAsync(
                 activityType,
                 TaskExecutionResult.class,
                 task.getReferenceTaskName(),
+                task.getTaskType(),
                 task.getInputData() != null ? task.getInputData() : Collections.emptyMap()
         );
 
@@ -1407,10 +1409,12 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
             ActivityStub activityStub = Workflow.newUntypedActivityStub(options);
 
             String activityType = task.getTaskDefName();
+            // Pass: taskRefName, conductorTaskType, inputData
             TaskExecutionResult result = activityStub.execute(
                     activityType,
                     TaskExecutionResult.class,
                     task.getReferenceTaskName(),
+                    task.getTaskType(),
                     task.getInputData() != null ? task.getInputData() : Collections.emptyMap()
             );
 

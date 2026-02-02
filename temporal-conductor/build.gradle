@@ -21,6 +21,9 @@ dependencies {
     implementation 'org.conductoross:conductor-core:3.21.23'
     implementation 'org.conductoross:conductor-common:3.21.23'
 
+    // Conductor extension tasks (auto-discovered via Spring)
+    implementation 'org.conductoross:conductor-json-jq-task:3.21.23'
+
     // RxJava (required for Conductor's ObservableQueue interface)
     implementation 'io.reactivex:rxjava:1.3.8'
 

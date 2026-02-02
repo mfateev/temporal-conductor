@@ -70,6 +70,7 @@ public interface TaskExecutionContext {
      * @param activityType the activity type name
      * @param taskId the task ID (used for tracking)
      * @param taskRefName the task reference name
+     * @param conductorTaskType the Conductor task type (e.g., JSON_JQ_TRANSFORM, SIMPLE)
      * @param inputData the activity input data
      * @param onComplete callback invoked with result or failure
      */
@@ -77,6 +78,7 @@ public interface TaskExecutionContext {
             String activityType,
             String taskId,
             String taskRefName,
+            String conductorTaskType,
             Map<String, Object> inputData,
             BiConsumer<TaskExecutionResult, Throwable> onComplete);
 

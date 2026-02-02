@@ -123,10 +123,12 @@ public class TaskExecutionContextImpl implements TaskExecutionContext {
             String activityType,
             String taskId,
             String taskRefName,
+            String conductorTaskType,
             Map<String, Object> inputData,
             BiConsumer<TaskExecutionResult, Throwable> onComplete) {
 
-        logger.debug("Starting async activity {} for task {}", activityType, taskRefName);
+        logger.debug("Starting async activity {} for task {} (type: {})",
+                activityType, taskRefName, conductorTaskType);
 
         ActivityOptions options = ActivityOptions.newBuilder()
                 .setStartToCloseTimeout(DEFAULT_START_TO_CLOSE_TIMEOUT)
@@ -137,10 +139,12 @@ public class TaskExecutionContextImpl implements TaskExecutionContext {
 
         ActivityStub activityStub = Workflow.newUntypedActivityStub(options);
 
+        // Pass: taskRefName, conductorTaskType, inputData
         Promise<TaskExecutionResult> promise = activityStub.executeAsync(
                 activityType,
                 TaskExecutionResult.class,
                 taskRefName,
+                conductorTaskType,
                 inputData != null ? inputData : Collections.emptyMap()
         );
 

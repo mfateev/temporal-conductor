@@ -102,6 +102,7 @@ public class ExtensionTaskAdapter implements TaskTypeHandler {
                 EXTENSION_ACTIVITY_TYPE,
                 taskId,
                 taskRefName,
+                taskType,
                 activityInput,
                 (result, failure) -> handleActivityCompletion(task, result, failure, context));
     }

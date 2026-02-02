@@ -27,48 +27,73 @@ import org.springframework.stereotype.Component;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 
 /**
- * Dynamic Activity implementation for executing Conductor tasks.
+ * Dynamic Activity implementation for executing SIMPLE Conductor tasks.
  *
  * <p>This implements DynamicActivity so that the Temporal activity type
  * equals the Conductor task name (e.g., "send_email", "process_order").
  * This provides better visibility in Temporal UI and enables per-task
  * metrics and configuration.
  *
- * <p>For POC purposes, this provides mock implementations of task execution.
- * In production, this would integrate with:
- * <ul>
- *   <li>Conductor worker polling (for SIMPLE tasks)</li>
- *   <li>HTTP client (for HTTP tasks)</li>
- *   <li>Other task-specific implementations</li>
- * </ul>
+ * <p>IMPORTANT: This activity only handles SIMPLE worker tasks. Extension
+ * task types (JSON_JQ_TRANSFORM, HTTP, KAFKA_PUBLISH, etc.) must be handled
+ * by the appropriate Conductor extension. If an extension task type reaches
+ * this activity, it means the extension is not configured and will fail.
+ *
+ * <p>For POC purposes, this provides stub implementations for SIMPLE tasks.
+ * In production, this would integrate with Conductor worker polling.
  */
 @Component
 public class TaskExecutionActivitiesImpl implements DynamicActivity {
 
     private static final Logger logger = LoggerFactory.getLogger(TaskExecutionActivitiesImpl.class);
 
+    /**
+     * Known Conductor extension task types that require extension dependencies.
+     * If these types reach this activity, the extension is not configured.
+     */
+    private static final Set<String> EXTENSION_TASK_TYPES = Set.of(
+            "JSON_JQ_TRANSFORM",
+            "HTTP",
+            "KAFKA_PUBLISH",
+            "AMQP_PUBLISH",
+            "SQS",
+            "LAMBDA",
+            "INLINE"
+    );
+
     @Override
     public Object execute(EncodedValues args) {
-        String taskName = Activity.getExecutionContext().getInfo().getActivityType();
+        String activityType = Activity.getExecutionContext().getInfo().getActivityType();
         String taskRefName = args.get(0, String.class);
+        String conductorTaskType = args.get(1, String.class);
         @SuppressWarnings("unchecked")
-        Map<String, Object> input = args.get(1, Map.class);
+        Map<String, Object> input = args.get(2, Map.class);
 
-        logger.info("Executing task: {} (ref: {})", taskName, taskRefName);
+        logger.info("Executing task: {} (ref: {}, conductorType: {})", activityType, taskRefName, conductorTaskType);
         logger.debug("Task input: {}", input);
 
-        if (taskName.toLowerCase().contains("http")) {
-            return executeHttpTask(taskName, taskRefName, input);
-        } else if (taskName.toLowerCase().contains("transform")) {
-            return executeTransformTask(taskName, taskRefName, input);
-        } else if (taskName.toLowerCase().contains("fail")) {
-            return executeFailingTask(taskName, taskRefName, input);
-        } else if (taskName.toLowerCase().contains("slow")) {
-            return executeSlowTask(taskName, taskRefName, input);
+        // Check for extension task types - these should be handled by extensions
+        if (EXTENSION_TASK_TYPES.contains(conductorTaskType)) {
+            logger.error("Extension task type '{}' is not configured", conductorTaskType);
+            return TaskExecutionResult.builder()
+                    .output(Collections.emptyMap())
+                    .status("FAILED")
+                    .failureReason("Extension task type '" + conductorTaskType + "' is not configured. " +
+                            "Add the appropriate Conductor extension dependency (e.g., conductor-json-jq-task).")
+                    .build();
+        }
+
+        // Test helpers for specific behaviors (based on activity type / task name)
+        if (activityType.toLowerCase().contains("fail")) {
+            return executeFailingTask(activityType, taskRefName, input);
+        } else if (activityType.toLowerCase().contains("slow")) {
+            return executeSlowTask(activityType, taskRefName, input);
         } else {
-            return executeSimpleTask(taskName, taskRefName, input);
+            // Default: execute as simple worker task stub
+            return executeSimpleTask(activityType, taskRefName, input);
         }
     }
 
@@ -85,61 +110,6 @@ public class TaskExecutionActivitiesImpl implements DynamicActivity {
 
         logger.info("Simple task completed: {}", taskRefName);
         return TaskExecutionResult.builder().output(output).build();
-    }
-
-    @SuppressWarnings("unchecked")
-    private TaskExecutionResult executeHttpTask(
-            String taskName,
-            String taskRefName,
-            Map<String, Object> input) {
-        String url = "http://example.com";
-        if (input != null) {
-            if (input.containsKey("url")) {
-                url = (String) input.get("url");
-            } else if (input.containsKey("http_request")) {
-                Object httpRequest = input.get("http_request");
-                if (httpRequest instanceof Map) {
-                    Object uri = ((Map<String, Object>) httpRequest).get("uri");
-                    if (uri instanceof String) {
-                        url = (String) uri;
-                    }
-                }
-            }
-        }
-
-        String method = input != null && input.containsKey("method")
-                ? (String) input.get("method")
-                : "GET";
-
-        logger.info("Mock HTTP {} request to: {}", method, url);
-
-        Map<String, Object> body = new HashMap<>();
-        body.put("message", "Mock response from " + url);
-        body.put("method", method);
-        body.put("timestamp", System.currentTimeMillis());
-
-        Map<String, Object> headers = new HashMap<>();
-        headers.put("Content-Type", "application/json");
-
-        Map<String, Object> output = new HashMap<>();
-        output.put("statusCode", 200);
-        output.put("headers", headers);
-        output.put("body", body);
-
-        return TaskExecutionResult.builder().output(output).build();
-    }
-
-    private TaskExecutionResult executeTransformTask(
-            String taskName,
-            String taskRefName,
-            Map<String, Object> input) {
-        Map<String, Object> transformed = new HashMap<>();
-        transformed.put("original", input != null ? input : Collections.emptyMap());
-        transformed.put("transformed", true);
-        transformed.put("transformedAt", System.currentTimeMillis());
-
-        logger.info("Transform task completed");
-        return TaskExecutionResult.builder().output(transformed).build();
     }
 
     private TaskExecutionResult executeFailingTask(

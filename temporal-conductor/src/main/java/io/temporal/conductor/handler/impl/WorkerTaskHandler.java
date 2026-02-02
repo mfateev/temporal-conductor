@@ -106,10 +106,12 @@ public class WorkerTaskHandler implements TaskTypeHandler {
         String activityType = task.getTaskDefName();
 
         // Execute activity asynchronously
+        // Pass: taskRefName, taskType, inputData
         context.executeActivityAsync(
                 activityType,
                 taskId,
                 taskRefName,
+                task.getTaskType(),
                 task.getInputData() != null ? task.getInputData() : Collections.emptyMap(),
                 (result, failure) -> handleActivityCompletion(task, result, failure, context));
     }

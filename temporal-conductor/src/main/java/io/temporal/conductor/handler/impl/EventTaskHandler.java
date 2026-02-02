@@ -126,6 +126,7 @@ public class EventTaskHandler implements TaskTypeHandler {
                 EVENT_PUBLISH_ACTIVITY,
                 taskId,
                 taskRefName,
+                task.getTaskType(),
                 activityInput,
                 (result, failure) -> handleEventPublishCompletion(task, queueName, result, failure, context));
     }
