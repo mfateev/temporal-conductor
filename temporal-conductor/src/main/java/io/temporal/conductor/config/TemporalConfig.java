@@ -17,27 +17,31 @@
 package io.temporal.conductor.config;
 
 import io.temporal.client.WorkflowClient;
-import io.temporal.client.WorkflowClientOptions;
+import io.temporal.conductor.activity.EventPublishActivity;
 import io.temporal.conductor.activity.TaskExecutionActivitiesImpl;
 import io.temporal.conductor.workflow.ConductorWorkflowImpl;
 import io.temporal.conductor.workflow.DefinitionWorkflowImpl;
-import io.temporal.serviceclient.WorkflowServiceStubs;
-import io.temporal.serviceclient.WorkflowServiceStubsOptions;
 import io.temporal.worker.Worker;
 import io.temporal.worker.WorkerFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.ApplicationListener;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
 
 /**
- * Temporal configuration for the conductor-server-temporal application.
+ * Temporal worker configuration for the conductor-server-temporal application.
  *
  * <p>This configuration is only active when the "temporal" profile is enabled.
- * It sets up the Temporal WorkflowClient, WorkerFactory, and registers the
- * ConductorWorkflow implementation.
+ * It uses the WorkflowClient provided by the Temporal Spring Boot starter and
+ * manually registers the DynamicWorkflow and DynamicActivity implementations
+ * since they cannot be auto-discovered.
+ *
+ * <p>Connection configuration is handled by the Spring Boot starter via
+ * spring.temporal.* properties in application.yml.
  */
 @Configuration
 @Profile("temporal")
@@ -45,77 +49,64 @@ public class TemporalConfig {
 
     private static final Logger logger = LoggerFactory.getLogger(TemporalConfig.class);
 
-    // Support standard Temporal env vars (TEMPORAL_ADDRESS, TEMPORAL_NAMESPACE)
-    // with fallback to Spring properties for backward compatibility
-    @Value("${TEMPORAL_ADDRESS:${temporal.service-address:localhost:7234}}")
-    private String serviceAddress;
-
-    @Value("${TEMPORAL_NAMESPACE:${temporal.namespace:conductor}}")
-    private String namespace;
-
-    @Value("${TEMPORAL_TASK_QUEUE:${temporal.task-queue:conductor-workflows}}")
+    @Value("${temporal.task-queue:conductor-workflows}")
     private String taskQueue;
 
     /**
-     * Creates the WorkflowServiceStubs for connecting to the Temporal server.
-     *
-     * @return configured WorkflowServiceStubs
-     */
-    @Bean
-    public WorkflowServiceStubs workflowServiceStubs() {
-        logger.info("Connecting to Temporal server at: {}", serviceAddress);
-        WorkflowServiceStubsOptions options = WorkflowServiceStubsOptions.newBuilder()
-                .setTarget(serviceAddress)
-                .build();
-        return WorkflowServiceStubs.newServiceStubs(options);
-    }
-
-    /**
-     * Creates the WorkflowClient for interacting with Temporal workflows.
-     *
-     * @param serviceStubs the service stubs for Temporal connection
-     * @return configured WorkflowClient
-     */
-    @Bean
-    public WorkflowClient workflowClient(WorkflowServiceStubs serviceStubs) {
-        logger.info("Creating WorkflowClient for namespace: {}", namespace);
-        WorkflowClientOptions options = WorkflowClientOptions.newBuilder()
-                .setNamespace(namespace)
-                .build();
-        return WorkflowClient.newInstance(serviceStubs, options);
-    }
-
-    /**
      * Creates the WorkerFactory for managing Temporal workers.
+     * Uses the WorkflowClient provided by the Spring Boot starter.
      *
-     * @param workflowClient the workflow client
+     * @param workflowClient the workflow client from Spring Boot starter
      * @return configured WorkerFactory
      */
     @Bean
     public WorkerFactory workerFactory(WorkflowClient workflowClient) {
+        logger.info("Creating WorkerFactory using Spring Boot starter WorkflowClient");
         return WorkerFactory.newInstance(workflowClient);
     }
 
     /**
-     * Creates and starts a Worker that processes Conductor workflows.
+     * Creates a Worker that processes Conductor workflows.
      *
      * <p>ConductorWorkflowImpl implements DynamicWorkflow, allowing the Temporal
      * workflow type to match the Conductor workflow name (e.g., "hello_workflow").
+     * This requires manual registration since DynamicWorkflow cannot be auto-discovered.
      *
      * @param workerFactory the worker factory
-     * @return configured and started Worker
+     * @param taskExecutionActivities the dynamic activity for task execution
+     * @param eventPublishActivity the activity for EVENT task publishing
+     * @return configured Worker
      */
     @Bean
-    public Worker conductorWorker(WorkerFactory workerFactory) {
+    public Worker conductorWorker(
+            WorkerFactory workerFactory,
+            TaskExecutionActivitiesImpl taskExecutionActivities,
+            EventPublishActivity eventPublishActivity) {
         logger.info("Creating worker for task queue: {}", taskQueue);
         Worker worker = workerFactory.newWorker(taskQueue);
-        // ConductorWorkflowImpl is a DynamicWorkflow - handles any workflow type
-        worker.registerWorkflowImplementationTypes(ConductorWorkflowImpl.class,
+
+        // Register DynamicWorkflow implementations - handles any workflow type
+        worker.registerWorkflowImplementationTypes(
+                ConductorWorkflowImpl.class,
                 DefinitionWorkflowImpl.class);
-        worker.registerActivitiesImplementations(new TaskExecutionActivitiesImpl());
-        workerFactory.start();
-        logger.info("Temporal worker started successfully");
+
+        // Register activity implementations (Spring beans with injected dependencies)
+        worker.registerActivitiesImplementations(taskExecutionActivities, eventPublishActivity);
+
+        logger.info("Worker configured with DynamicWorkflow and activities");
         return worker;
+    }
+
+    /**
+     * Starts the WorkerFactory when the application is ready.
+     */
+    @Bean
+    public ApplicationListener<ApplicationReadyEvent> workerFactoryStarter(WorkerFactory workerFactory) {
+        return event -> {
+            logger.info("Starting Temporal WorkerFactory");
+            workerFactory.start();
+            logger.info("Temporal worker started successfully on task queue: {}", taskQueue);
+        };
     }
 
     /**

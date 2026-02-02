@@ -20,11 +20,13 @@ import io.temporal.activity.Activity;
 import io.temporal.activity.DynamicActivity;
 import io.temporal.common.converter.EncodedValues;
 import io.temporal.conductor.workflow.model.TaskExecutionResult;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
+
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * Dynamic Activity implementation for executing Conductor tasks.
@@ -42,6 +44,7 @@ import org.slf4j.LoggerFactory;
  *   <li>Other task-specific implementations</li>
  * </ul>
  */
+@Component
 public class TaskExecutionActivitiesImpl implements DynamicActivity {
 
     private static final Logger logger = LoggerFactory.getLogger(TaskExecutionActivitiesImpl.class);

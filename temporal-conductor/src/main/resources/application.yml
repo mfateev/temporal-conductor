@@ -96,12 +96,18 @@ management:
       export:
         enabled: false
 
-# Temporal configuration (for non-stub mode)
+# Temporal configuration using Spring Boot starter
 # Standard Temporal env vars (TEMPORAL_ADDRESS, TEMPORAL_NAMESPACE) take precedence
+spring.temporal:
+  connection:
+    target: ${TEMPORAL_ADDRESS:localhost:7233}
+  namespace: ${TEMPORAL_NAMESPACE:conductor}
+  # Disable auto-worker creation - we create workers manually for DynamicWorkflow
+  start-workers: false
+
+# Legacy temporal.* properties for backward compatibility
 temporal:
-  namespace: conductor
-  service-address: localhost:7234
-  task-queue: conductor-workflows
+  task-queue: ${TEMPORAL_TASK_QUEUE:conductor-workflows}
 
 # Swagger/OpenAPI
 springdoc:

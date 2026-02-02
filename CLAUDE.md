@@ -165,22 +165,25 @@ The E2E tests run against Docker Compose containers. The Temporal server is expo
 
 **NEVER unzip JAR files** to inspect source code from dependencies. Instead:
 
-1. Clone the repository to the shared `repos/` directory
-2. Create a worktree in the task folder if needed
-3. Read the source code directly from the cloned repository
+1. **Check if repository already exists** before cloning
+2. **Check if worktree already exists** before creating one
+3. Clone the repository to the shared `repos/` directory if needed
+4. Create a worktree in the task folder if needed
+5. Read the source code directly from the cloned repository
 
 Example for Netflix Conductor:
 ```bash
-# Clone to shared repos (if not already done)
+# ALWAYS check first before cloning
 cd /Users/maxim/workarea/repos
-git clone https://github.com/conductor-oss/conductor.git
+ls -d conductor 2>/dev/null && echo "Already cloned" || git clone https://github.com/conductor-oss/conductor.git
 
-# Create worktree in task folder (optional, for specific branch/tag)
+# ALWAYS check first before creating worktree
 cd /Users/maxim/workarea/repos/conductor
-git worktree add /path/to/task/conductor-ref <branch-or-tag>
+git worktree list | grep /path/to/task || git worktree add /path/to/task/conductor-ref <branch-or-tag>
 ```
 
 This approach:
+- Avoids duplicate clones and worktrees
 - Provides full source with history and context
 - Allows navigation between related files
 - Enables searching across the entire codebase

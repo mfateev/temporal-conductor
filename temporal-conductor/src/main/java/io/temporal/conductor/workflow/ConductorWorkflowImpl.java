@@ -30,6 +30,7 @@ import com.netflix.conductor.model.TaskModel;
 import com.netflix.conductor.model.WorkflowModel;
 import io.temporal.activity.ActivityOptions;
 import io.temporal.common.RetryOptions;
+import io.temporal.conductor.activity.EventPublishActivity;
 import io.temporal.workflow.ActivityStub;
 import io.temporal.api.enums.v1.ParentClosePolicy;
 import io.temporal.workflow.ChildWorkflowOptions;
@@ -555,6 +556,11 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
             return;
         }
 
+        if (TaskType.EVENT.name().equals(task.getTaskType())) {
+            executeEventTask(task);
+            return;
+        }
+
         systemTaskExecutor.execute(workflowModel, task);
 
         if (task.getStatus().isTerminal() && task.getEndTime() == 0L) {
@@ -994,6 +1000,106 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
         task.setOutputData(outputData);
         task.setStatus(TaskModel.Status.COMPLETED);
         task.setEndTime(Workflow.currentTimeMillis());
+    }
+
+    /**
+     * Execute EVENT task - publishes an event to a queue via activity.
+     * Reuses Conductor's Event task logic for payload preparation and queue name computation.
+     */
+    private void executeEventTask(TaskModel task) {
+        String taskRefName = task.getReferenceTaskName();
+
+        if (task.getStatus() == TaskModel.Status.SCHEDULED) {
+            task.setStatus(TaskModel.Status.IN_PROGRESS);
+            task.setStartTime(Workflow.currentTimeMillis());
+        }
+
+        if (task.getStatus().isTerminal()) {
+            return;
+        }
+
+        // Prepare event payload (reusing Conductor's Event task logic)
+        Map<String, Object> payload = new HashMap<>(
+                task.getInputData() != null ? task.getInputData() : Collections.emptyMap());
+        payload.put("workflowInstanceId", workflowModel.getWorkflowId());
+        payload.put("workflowType", workflowModel.getWorkflowName());
+        payload.put("workflowVersion", workflowModel.getWorkflowVersion());
+        payload.put("correlationId", workflowModel.getCorrelationId());
+
+        // Compute queue name from sink parameter (reusing Conductor's logic)
+        String sinkValue = (String) task.getInputData().get("sink");
+        if (sinkValue == null || sinkValue.isEmpty()) {
+            task.setStatus(TaskModel.Status.FAILED);
+            task.setReasonForIncompletion("EVENT task requires 'sink' parameter");
+            task.setEndTime(Workflow.currentTimeMillis());
+            return;
+        }
+
+        String queueName = computeEventQueueName(sinkValue);
+
+        // Set output data (includes payload and queue name)
+        task.addOutput(payload);
+        task.addOutput("event_produced", queueName);
+
+        // Serialize payload to JSON
+        String payloadJson;
+        try {
+            payloadJson = objectMapper.writeValueAsString(task.getOutputData());
+        } catch (JsonProcessingException e) {
+            task.setStatus(TaskModel.Status.FAILED);
+            task.setReasonForIncompletion("Failed to serialize event payload: " + e.getMessage());
+            task.setEndTime(Workflow.currentTimeMillis());
+            return;
+        }
+
+        // Call activity to publish event
+        ActivityOptions options = ActivityOptions.newBuilder()
+                .setStartToCloseTimeout(Duration.ofMinutes(5))
+                .setRetryOptions(RetryOptions.newBuilder()
+                        .setMaximumAttempts(3)
+                        .build())
+                .build();
+
+        EventPublishActivity eventActivity = Workflow.newActivityStub(EventPublishActivity.class, options);
+
+        try {
+            eventActivity.publish(queueName, task.getTaskId(), payloadJson);
+            task.setStatus(TaskModel.Status.COMPLETED);
+            logger.info("EVENT task {} published to queue '{}'", taskRefName, queueName);
+        } catch (Exception e) {
+            task.setStatus(TaskModel.Status.FAILED);
+            task.setReasonForIncompletion("Failed to publish event: " + e.getMessage());
+            logger.error("EVENT task {} failed to publish to queue '{}': {}",
+                    taskRefName, queueName, e.getMessage());
+        }
+
+        task.setEndTime(Workflow.currentTimeMillis());
+    }
+
+    /**
+     * Compute the queue name from the sink parameter.
+     * Follows Conductor's Event task logic for queue name computation.
+     */
+    private String computeEventQueueName(String sinkValue) {
+        String queueName = sinkValue;
+
+        if (sinkValue.startsWith("conductor")) {
+            if ("conductor".equals(sinkValue)) {
+                // conductor -> conductor:workflowName:taskRefName
+                queueName = sinkValue + ":" + workflowModel.getWorkflowName() + ":" +
+                        workflowModel.getTasks().stream()
+                                .filter(t -> TaskType.EVENT.name().equals(t.getTaskType()))
+                                .findFirst()
+                                .map(TaskModel::getReferenceTaskName)
+                                .orElse("event");
+            } else if (sinkValue.startsWith("conductor:")) {
+                // conductor:eventName -> conductor:workflowName:eventName
+                queueName = "conductor:" + workflowModel.getWorkflowName() + ":" +
+                        sinkValue.substring("conductor:".length());
+            }
+        }
+
+        return queueName;
     }
 
     /**

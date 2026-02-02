@@ -20,8 +20,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.netflix.conductor.common.metadata.tasks.TaskType;
 import com.netflix.conductor.core.config.ConductorProperties;
 import com.netflix.conductor.core.execution.DeciderService;
+import com.netflix.conductor.core.events.EventQueueProvider;
+import com.netflix.conductor.core.events.EventQueues;
 import com.netflix.conductor.core.execution.tasks.Decision;
 import com.netflix.conductor.core.execution.tasks.DoWhile;
+import com.netflix.conductor.core.execution.tasks.Event;
 import com.netflix.conductor.core.execution.tasks.Fork;
 import com.netflix.conductor.core.execution.tasks.Join;
 import com.netflix.conductor.core.execution.tasks.SetVariable;
@@ -68,6 +71,7 @@ public class SystemTaskExecutor {
         SYSTEM_TASK_TYPES.add(TaskType.WAIT.name());
         SYSTEM_TASK_TYPES.add(TaskType.SUB_WORKFLOW.name());
         SYSTEM_TASK_TYPES.add(TaskType.START_WORKFLOW.name());
+        SYSTEM_TASK_TYPES.add(TaskType.EVENT.name());
     }
 
     private final InMemoryWorkflowExecutor inMemoryWorkflowExecutor;
