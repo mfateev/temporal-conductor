@@ -22,6 +22,7 @@ import io.temporal.common.converter.EncodedValues;
 import io.temporal.conductor.workflow.model.TaskExecutionResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.Collections;
@@ -30,19 +31,18 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Dynamic Activity implementation for executing SIMPLE Conductor tasks.
+ * Dynamic Activity implementation for executing Conductor tasks.
  *
  * <p>This implements DynamicActivity so that the Temporal activity type
  * equals the Conductor task name (e.g., "send_email", "process_order").
  * This provides better visibility in Temporal UI and enables per-task
  * metrics and configuration.
  *
- * <p>IMPORTANT: This activity only handles SIMPLE worker tasks. Extension
- * task types (JSON_JQ_TRANSFORM, HTTP, KAFKA_PUBLISH, etc.) must be handled
- * by the appropriate Conductor extension. If an extension task type reaches
- * this activity, it means the extension is not configured and will fail.
+ * <p>For extension task types (JSON_JQ_TRANSFORM, KAFKA_PUBLISH, etc.),
+ * this activity delegates to the {@link ExtensionTaskExecutionActivityImpl}
+ * which has the registered WorkflowSystemTask implementations.
  *
- * <p>For POC purposes, this provides stub implementations for SIMPLE tasks.
+ * <p>For SIMPLE tasks, this provides stub implementations for POC purposes.
  * In production, this would integrate with Conductor worker polling.
  */
 @Component
@@ -51,8 +51,7 @@ public class TaskExecutionActivitiesImpl implements DynamicActivity {
     private static final Logger logger = LoggerFactory.getLogger(TaskExecutionActivitiesImpl.class);
 
     /**
-     * Known Conductor extension task types that require extension dependencies.
-     * If these types reach this activity, the extension is not configured.
+     * Known Conductor extension task types that should be delegated to extension activity.
      */
     private static final Set<String> EXTENSION_TASK_TYPES = Set.of(
             "JSON_JQ_TRANSFORM",
@@ -63,6 +62,28 @@ public class TaskExecutionActivitiesImpl implements DynamicActivity {
             "LAMBDA",
             "INLINE"
     );
+
+    private final ExtensionTaskExecutionActivityImpl extensionActivity;
+
+    /**
+     * Constructor for Spring dependency injection.
+     *
+     * @param extensionActivity the extension task execution activity
+     */
+    @Autowired
+    public TaskExecutionActivitiesImpl(ExtensionTaskExecutionActivityImpl extensionActivity) {
+        this.extensionActivity = extensionActivity;
+        logger.info("TaskExecutionActivitiesImpl initialized with extension activity supporting: {}",
+                extensionActivity.getRegisteredTaskTypes());
+    }
+
+    /**
+     * No-arg constructor for testing without extensions.
+     */
+    public TaskExecutionActivitiesImpl() {
+        this.extensionActivity = new ExtensionTaskExecutionActivityImpl();
+        logger.info("TaskExecutionActivitiesImpl initialized without extension activity");
+    }
 
     @Override
     public Object execute(EncodedValues args) {
@@ -75,15 +96,20 @@ public class TaskExecutionActivitiesImpl implements DynamicActivity {
         logger.info("Executing task: {} (ref: {}, conductorType: {})", activityType, taskRefName, conductorTaskType);
         logger.debug("Task input: {}", input);
 
-        // Check for extension task types - these should be handled by extensions
+        // Check for extension task types - delegate to extension activity
         if (EXTENSION_TASK_TYPES.contains(conductorTaskType)) {
-            logger.error("Extension task type '{}' is not configured", conductorTaskType);
-            return TaskExecutionResult.builder()
-                    .output(Collections.emptyMap())
-                    .status("FAILED")
-                    .failureReason("Extension task type '" + conductorTaskType + "' is not configured. " +
-                            "Add the appropriate Conductor extension dependency (e.g., conductor-json-jq-task).")
-                    .build();
+            if (extensionActivity.getRegisteredTaskTypes().contains(conductorTaskType)) {
+                logger.info("Delegating extension task type '{}' to extension activity", conductorTaskType);
+                return extensionActivity.execute(conductorTaskType, taskRefName, input);
+            } else {
+                logger.error("Extension task type '{}' is not configured", conductorTaskType);
+                return TaskExecutionResult.builder()
+                        .output(Collections.emptyMap())
+                        .status("FAILED")
+                        .failureReason("Extension task type '" + conductorTaskType + "' is not configured. " +
+                                "Add the appropriate Conductor extension dependency (e.g., conductor-json-jq-task).")
+                        .build();
+            }
         }
 
         // Test helpers for specific behaviors (based on activity type / task name)
