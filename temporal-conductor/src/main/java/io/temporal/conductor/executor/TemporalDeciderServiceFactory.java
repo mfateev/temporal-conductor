@@ -22,6 +22,7 @@ import com.netflix.conductor.core.config.ConductorProperties;
 import com.netflix.conductor.core.execution.DeciderService;
 import com.netflix.conductor.core.execution.mapper.DoWhileTaskMapper;
 import com.netflix.conductor.core.execution.mapper.DynamicTaskMapper;
+import com.netflix.conductor.core.execution.mapper.EventTaskMapper;
 import com.netflix.conductor.core.execution.mapper.ForkJoinDynamicTaskMapper;
 import com.netflix.conductor.core.execution.mapper.ForkJoinTaskMapper;
 import com.netflix.conductor.core.execution.mapper.HumanTaskMapper;
@@ -172,6 +173,9 @@ public class TemporalDeciderServiceFactory {
 
         HumanTaskMapper humanMapper = new HumanTaskMapper(parametersUtils);
         mappers.put(TaskType.HUMAN.name(), humanMapper);
+
+        EventTaskMapper eventMapper = new EventTaskMapper(parametersUtils);
+        mappers.put(TaskType.EVENT.name(), eventMapper);
 
         return mappers;
     }

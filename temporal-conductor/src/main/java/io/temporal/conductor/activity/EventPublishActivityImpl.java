@@ -56,12 +56,13 @@ public class EventPublishActivityImpl implements EventPublishActivity {
     }
 
     @Override
-    public TaskExecutionResult executeEvent(String taskRefName, Map<String, Object> inputData) {
+    public TaskExecutionResult executeEvent(String taskRefName, String conductorTaskType, Map<String, Object> inputData) {
         String queueName = (String) inputData.get("queueName");
         String taskId = (String) inputData.get("taskId");
         String payloadJson = (String) inputData.get("payloadJson");
 
-        logger.info("Executing event task '{}': queue={}, taskId={}", taskRefName, queueName, taskId);
+        logger.info("Executing event task '{}' (type: {}): queue={}, taskId={}",
+                taskRefName, conductorTaskType, queueName, taskId);
 
         try {
             publish(queueName, taskId, payloadJson);

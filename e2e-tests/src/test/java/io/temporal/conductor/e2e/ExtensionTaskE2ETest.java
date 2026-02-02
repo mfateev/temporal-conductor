@@ -43,8 +43,9 @@ class ExtensionTaskE2ETest extends AbstractE2ETest {
         String workflowName = "jq_transform_e2e";
 
         // Create workflow with JSON_JQ_TRANSFORM task
+        // Expression accesses .data because workflow input is mapped to task input under 'data' key
         WorkflowDef workflowDef = createJqTransformWorkflow(workflowName,
-                "{ name: .name, location: .city }");
+                "{ name: .data.name, location: .data.city }");
         registerWorkflowDef(workflowDef);
 
         // Start workflow with input data
@@ -77,8 +78,9 @@ class ExtensionTaskE2ETest extends AbstractE2ETest {
         String workflowName = "jq_array_e2e";
 
         // Create workflow with JQ expression that processes array
+        // Expression accesses .data because workflow input is mapped to task input under 'data' key
         WorkflowDef workflowDef = createJqTransformWorkflow(workflowName,
-                "[.items[].value] | add");
+                "[.data.items[].value] | add");
         registerWorkflowDef(workflowDef);
 
         // Start workflow with array input
@@ -103,8 +105,9 @@ class ExtensionTaskE2ETest extends AbstractE2ETest {
         String workflowName = "jq_nested_e2e";
 
         // Create workflow with JQ expression that extracts nested data
+        // Expression accesses .data because workflow input is mapped to task input under 'data' key
         WorkflowDef workflowDef = createJqTransformWorkflow(workflowName,
-                ".user.address.city");
+                ".data.user.address.city");
         registerWorkflowDef(workflowDef);
 
         // Start workflow with nested input
@@ -180,6 +183,9 @@ class ExtensionTaskE2ETest extends AbstractE2ETest {
 
         Map<String, Object> inputParams = new HashMap<>();
         inputParams.put("queryExpression", jqExpression);
+        // Pass workflow input to task so JQ expression can access it
+        // The JQ expression operates on the task's input data (excluding queryExpression)
+        inputParams.put("data", "${workflow.input}");
         jqTask.setInputParameters(inputParams);
 
         workflowDef.setTasks(Collections.singletonList(jqTask));
@@ -197,7 +203,10 @@ class ExtensionTaskE2ETest extends AbstractE2ETest {
         jqTask.setTaskReferenceName("jq_transform_ref");
         jqTask.setType("JSON_JQ_TRANSFORM");
         Map<String, Object> jqParams = new HashMap<>();
-        jqParams.put("queryExpression", "{ doubled: (.value * 2) }");
+        // Expression accesses .data because workflow input is mapped to task input under 'data' key
+        jqParams.put("queryExpression", "{ doubled: (.data.value * 2) }");
+        // Pass workflow input to task so JQ expression can access it
+        jqParams.put("data", "${workflow.input}");
         jqTask.setInputParameters(jqParams);
 
         // SIMPLE task

@@ -42,10 +42,14 @@ public interface EventPublishActivity {
      * Execute event publishing and return a TaskExecutionResult.
      * This method is used by the EventTaskHandler for async activity execution.
      *
+     * <p>The parameters match the standard activity invocation pattern used by
+     * {@code TaskExecutionContextImpl.executeActivityAsync()}.
+     *
      * @param taskRefName the task reference name
+     * @param conductorTaskType the Conductor task type (e.g., "EVENT")
      * @param inputData the input data containing queueName, taskId, and payloadJson
      * @return the task execution result
      */
     @ActivityMethod(name = "event-publish")
-    TaskExecutionResult executeEvent(String taskRefName, Map<String, Object> inputData);
+    TaskExecutionResult executeEvent(String taskRefName, String conductorTaskType, Map<String, Object> inputData);
 }

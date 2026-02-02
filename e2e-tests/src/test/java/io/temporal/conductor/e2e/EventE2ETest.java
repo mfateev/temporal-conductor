@@ -185,10 +185,8 @@ class EventE2ETest extends AbstractE2ETest {
         eventTask.setName("event_task");
         eventTask.setTaskReferenceName("event_task_ref");
         eventTask.setType(TaskType.EVENT.name());
-
-        Map<String, Object> inputParams = new HashMap<>();
-        inputParams.put("sink", sink);
-        eventTask.setInputParameters(inputParams);
+        // EventTaskMapper uses workflowTask.getSink(), so we must set sink via setSink()
+        eventTask.setSink(sink);
 
         workflowDef.setTasks(Collections.singletonList(eventTask));
         return workflowDef;
@@ -206,9 +204,10 @@ class EventE2ETest extends AbstractE2ETest {
         eventTask.setName("event_task");
         eventTask.setTaskReferenceName("event_task_ref");
         eventTask.setType(TaskType.EVENT.name());
+        // EventTaskMapper uses workflowTask.getSink(), so we must set sink via setSink()
+        eventTask.setSink("conductor:order-events");
 
         Map<String, Object> inputParams = new HashMap<>();
-        inputParams.put("sink", "conductor:order-events");
         inputParams.put("orderId", "${workflow.input.orderId}");
         inputParams.put("customerId", "${workflow.input.customerId}");
         eventTask.setInputParameters(inputParams);
@@ -232,9 +231,8 @@ class EventE2ETest extends AbstractE2ETest {
         eventTask.setName("event_task");
         eventTask.setTaskReferenceName("event_task_ref");
         eventTask.setType(TaskType.EVENT.name());
-        Map<String, Object> eventParams = new HashMap<>();
-        eventParams.put("sink", "kafka:order-notifications");
-        eventTask.setInputParameters(eventParams);
+        // EventTaskMapper uses workflowTask.getSink(), so we must set sink via setSink()
+        eventTask.setSink("kafka:order-notifications");
         tasks.add(eventTask);
 
         // SIMPLE task after EVENT
