@@ -71,7 +71,7 @@ public final class SharedE2EContainers {
                 .withExposedService(TEMPORAL_SERVICE, TEMPORAL_PORT,
                         Wait.forHealthcheck().withStartupTimeout(Duration.ofMinutes(2)))
                 .withExposedService(CONDUCTOR_SERVICE, CONDUCTOR_PORT,
-                        Wait.forHealthcheck().withStartupTimeout(Duration.ofMinutes(2)))
+                        Wait.forHealthcheck().withStartupTimeout(Duration.ofMinutes(3)))
                 .withLocalCompose(true);
 
         composeContainer.start();

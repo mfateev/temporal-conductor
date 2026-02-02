@@ -62,8 +62,14 @@ dependencies {
 test {
     useJUnitPlatform()
 
+    // E2E tests must run from module directory for docker-compose relative paths
+    workingDir = projectDir
+
     // E2E tests may take longer
     systemProperty 'junit.jupiter.execution.timeout.default', '5m'
+
+    // Run E2E tests sequentially - containers are shared but startup coordination requires this
+    systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
 
     testLogging {
         events 'passed', 'skipped', 'failed'

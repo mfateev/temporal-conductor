@@ -32,7 +32,6 @@ import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
 
 /**
  * Implementation of ExtensionTaskExecutionActivity that executes Conductor extension tasks.
@@ -47,8 +46,11 @@ import org.springframework.stereotype.Component;
  *   <li>Call the extension task's start() and execute() methods</li>
  *   <li>Extract the output data and status from the TaskModel</li>
  * </ol>
+ *
+ * <p>Note: This class is not annotated with @Component. It is created as a bean by
+ * {@link io.temporal.conductor.config.ExtensionTaskDiscoveryConfig} with the discovered
+ * extension tasks injected.
  */
-@Component
 public class ExtensionTaskExecutionActivityImpl implements ExtensionTaskExecutionActivity {
 
     private static final Logger logger = LoggerFactory.getLogger(ExtensionTaskExecutionActivityImpl.class);

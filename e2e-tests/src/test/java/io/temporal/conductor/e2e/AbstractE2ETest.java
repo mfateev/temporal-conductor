@@ -73,7 +73,7 @@ public abstract class AbstractE2ETest {
     protected static WebClient conductorClient;
 
     @BeforeAll
-    @Timeout(value = 3, unit = TimeUnit.MINUTES)  // Container startup (image should be pre-built by Gradle)
+    @Timeout(value = 5, unit = TimeUnit.MINUTES)  // Container startup (image should be pre-built by Gradle)
     static void initializeSharedContainers() {
         // Use singleton pattern - containers are started once and reused across all test classes
         SharedE2EContainers shared = SharedE2EContainers.getInstance();
