@@ -26,6 +26,7 @@ import com.netflix.conductor.core.execution.tasks.Decision;
 import com.netflix.conductor.core.execution.tasks.DoWhile;
 import com.netflix.conductor.core.execution.tasks.Event;
 import com.netflix.conductor.core.execution.tasks.Fork;
+import com.netflix.conductor.core.execution.tasks.Human;
 import com.netflix.conductor.core.execution.tasks.Join;
 import com.netflix.conductor.core.execution.tasks.SetVariable;
 import com.netflix.conductor.core.execution.tasks.Switch;
@@ -72,6 +73,7 @@ public class SystemTaskExecutor {
         SYSTEM_TASK_TYPES.add(TaskType.SUB_WORKFLOW.name());
         SYSTEM_TASK_TYPES.add(TaskType.START_WORKFLOW.name());
         SYSTEM_TASK_TYPES.add(TaskType.EVENT.name());
+        SYSTEM_TASK_TYPES.add(TaskType.HUMAN.name());
     }
 
     private final InMemoryWorkflowExecutor inMemoryWorkflowExecutor;
@@ -127,6 +129,7 @@ public class SystemTaskExecutor {
         systemTasks.put(TaskType.DO_WHILE.name(),
                 new DoWhile(parametersUtils, inMemoryExecutionDaoFacade));
         systemTasks.put(TaskType.WAIT.name(), new Wait());
+        systemTasks.put(TaskType.HUMAN.name(), new Human());
 
         this.systemTaskRegistry = new SystemTaskRegistry(new HashSet<>(systemTasks.values()));
     }

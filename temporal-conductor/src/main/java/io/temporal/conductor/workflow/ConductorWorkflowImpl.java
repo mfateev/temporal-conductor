@@ -400,6 +400,7 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
                 .anyMatch(t -> t.getStatus() == TaskModel.Status.IN_PROGRESS
                         && isSystemTask(t)
                         && !TaskType.WAIT.name().equals(t.getTaskType())
+                        && !TaskType.HUMAN.name().equals(t.getTaskType())
                         && !TaskType.JOIN.name().equals(t.getTaskType())
                         && !TaskType.SUB_WORKFLOW.name().equals(t.getTaskType()));
 
@@ -561,6 +562,11 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
             return;
         }
 
+        if (TaskType.HUMAN.name().equals(task.getTaskType())) {
+            executeHumanTask(task);
+            return;
+        }
+
         systemTaskExecutor.execute(workflowModel, task);
 
         if (task.getStatus().isTerminal() && task.getEndTime() == 0L) {
@@ -638,6 +644,29 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
             }
         }
         logger.debug("WAIT task {} waiting indefinitely for signal", taskRefName);
+    }
+
+    /**
+     * Execute a HUMAN task.
+     * HUMAN tasks wait indefinitely for external completion via signal.
+     * They are completed by calling the completeTask signal with the task reference name.
+     */
+    private void executeHumanTask(TaskModel task) {
+        String taskRefName = task.getReferenceTaskName();
+
+        if (task.getStatus() == TaskModel.Status.SCHEDULED) {
+            task.setStatus(TaskModel.Status.IN_PROGRESS);
+        }
+
+        if (task.getStatus().isTerminal()) {
+            if (task.getEndTime() == 0L) {
+                task.setEndTime(Workflow.currentTimeMillis());
+            }
+            return;
+        }
+
+        // HUMAN tasks wait indefinitely for a completeTask signal
+        logger.info("HUMAN task {} waiting for manual completion via signal", taskRefName);
     }
 
     /**
@@ -1189,6 +1218,7 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
                 .anyMatch(t -> t.getStatus() == TaskModel.Status.IN_PROGRESS
                         && isSystemTask(t)
                         && !TaskType.WAIT.name().equals(t.getTaskType())
+                        && !TaskType.HUMAN.name().equals(t.getTaskType())
                         && !TaskType.JOIN.name().equals(t.getTaskType())
                         && !TaskType.SUB_WORKFLOW.name().equals(t.getTaskType()));
 
@@ -1458,6 +1488,12 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
                     Map<String, Object> output = encodedArgs.get(1, Map.class);
                     completeTask(taskRefName, output);
                     break;
+                case "completeTaskById":
+                    String taskId = encodedArgs.get(0, String.class);
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> taskOutput = encodedArgs.get(1, Map.class);
+                    completeTaskById(taskId, taskOutput);
+                    break;
                 case "pause":
                     pause();
                     break;
@@ -1493,6 +1529,19 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
     private void completeTask(String taskRefName, Map<String, Object> output) {
         logger.info("Received signal to complete task: {}", taskRefName);
         pendingSignals.put(taskRefName, output);
+    }
+
+    private void completeTaskById(String taskId, Map<String, Object> output) {
+        logger.info("Received signal to complete task by ID: {}", taskId);
+        TaskModel task = workflowModel.getTasks().stream()
+                .filter(t -> taskId.equals(t.getTaskId()))
+                .findFirst()
+                .orElse(null);
+        if (task != null) {
+            pendingSignals.put(task.getReferenceTaskName(), output);
+        } else {
+            logger.warn("Task not found for ID: {}", taskId);
+        }
     }
 
     private void pause() {

@@ -143,17 +143,13 @@ public class TemporalTaskService implements TaskService {
         }
 
         try {
-            // Signal the workflow to complete the task
+            // Signal the workflow to complete the task by ID
+            // The workflow does the taskId -> taskRefName lookup internally
             WorkflowStub workflowStub = workflowClient.newUntypedWorkflowStub(workflowId);
-
-            // Get the reference task name for signaling
-            String taskRefName = getTaskRefName(workflowId, taskResult.getTaskId());
-            if (taskRefName != null) {
-                workflowStub.signal("completeTask", taskRefName,
-                        taskResult.getOutputData() != null
-                                ? taskResult.getOutputData() : Collections.emptyMap());
-                logger.info("Task completion signaled: taskRef={}", taskRefName);
-            }
+            workflowStub.signal("completeTaskById", taskResult.getTaskId(),
+                    taskResult.getOutputData() != null
+                            ? taskResult.getOutputData() : Collections.emptyMap());
+            logger.info("Task completion signaled: taskId={}", taskResult.getTaskId());
         } catch (Exception e) {
             logger.warn("Failed to signal task completion: {}", e.getMessage());
         }
@@ -170,22 +166,6 @@ public class TemporalTaskService implements TaskService {
      */
     public void registerTaskMapping(String taskId, String workflowId) {
         taskToWorkflowMapping.put(taskId, workflowId);
-    }
-
-    private String getTaskRefName(String workflowId, String taskId) {
-        try {
-            WorkflowStub workflowStub = workflowClient.newUntypedWorkflowStub(workflowId);
-            List<TaskState> tasks = workflowStub.query("getTasks", List.class);
-
-            for (TaskState taskState : tasks) {
-                if (taskId.equals(taskState.getTaskId())) {
-                    return taskState.getReferenceTaskName();
-                }
-            }
-        } catch (Exception e) {
-            logger.warn("Failed to get task reference name: {}", e.getMessage());
-        }
-        return null;
     }
 
     private Task convertToTask(TaskState taskState, String workflowId) {
