@@ -39,6 +39,11 @@ import io.temporal.conductor.executor.DeterministicIdGenerator;
 import io.temporal.conductor.executor.InMemoryMetadataDAO;
 import io.temporal.conductor.executor.SystemTaskExecutor;
 import io.temporal.conductor.executor.TemporalDeciderServiceFactory;
+import io.temporal.conductor.handler.TaskExecutionContext;
+import io.temporal.conductor.handler.TaskTypeHandler;
+import io.temporal.conductor.handler.TaskTypeHandlerFactory;
+import io.temporal.conductor.handler.TaskTypeHandlerRegistry;
+import io.temporal.conductor.handler.impl.TaskExecutionContextImpl;
 import io.temporal.common.converter.EncodedValues;
 import io.temporal.conductor.workflow.model.ConductorWorkflowInput;
 import io.temporal.conductor.workflow.model.ConductorWorkflowOutput;
@@ -112,6 +117,10 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
     private ConductorWorkflowInput workflowInput;
     private DeterministicIdGenerator idGenerator;
     private int continueAsNewCount = 0;
+
+    // Task type handler infrastructure
+    private TaskTypeHandlerRegistry handlerRegistry;
+    private TaskExecutionContext executionContext;
 
     // Default timeouts when TaskDef doesn't specify values
     private static final Duration DEFAULT_START_TO_CLOSE_TIMEOUT = Duration.ofMinutes(10);
@@ -234,6 +243,21 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
         workflowModel.setPriority(input.getPriority() != null ? input.getPriority() : 0);
         workflowModel.setOwnerApp(input.getOwnerApp());
         workflowModel.setCreatedBy(input.getCreatedBy());
+
+        // Initialize task type handler infrastructure
+        handlerRegistry = TaskTypeHandlerFactory.createRegistry();
+        executionContext = new TaskExecutionContextImpl(
+                objectMapper,
+                deciderService,
+                systemTaskExecutor,
+                metadataDao,
+                input,
+                pendingActivityTaskIds,
+                pendingTimerTaskRefs,
+                pendingChildWorkflowTaskIds,
+                pendingSignals,
+                updated -> stateUpdated = updated
+        );
     }
 
     private void initializeSearchAttributes(WorkflowDef workflowDef, ConductorWorkflowInput input) {
@@ -538,52 +562,9 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
         logger.debug("Executing system task: {} ({})",
                 task.getReferenceTaskName(), task.getTaskType());
 
-        if (task.getStartTime() == 0L) {
-            task.setStartTime(Workflow.currentTimeMillis());
-        }
-
-        if (TaskType.WAIT.name().equals(task.getTaskType())) {
-            executeWaitTask(task);
-            return;
-        }
-
-        if (TaskType.SUB_WORKFLOW.name().equals(task.getTaskType())) {
-            executeSubWorkflowTask(task);
-            return;
-        }
-
-        if (TaskType.START_WORKFLOW.name().equals(task.getTaskType())) {
-            executeStartWorkflowTask(task);
-            return;
-        }
-
-        if (TaskType.EVENT.name().equals(task.getTaskType())) {
-            executeEventTask(task);
-            return;
-        }
-
-        if (TaskType.HUMAN.name().equals(task.getTaskType())) {
-            executeHumanTask(task);
-            return;
-        }
-
-        systemTaskExecutor.execute(workflowModel, task);
-
-        if (task.getStatus().isTerminal() && task.getEndTime() == 0L) {
-            task.setEndTime(Workflow.currentTimeMillis());
-        }
-
-        if (TaskType.TERMINATE.name().equals(task.getTaskType())
-                && task.getStatus() == TaskModel.Status.COMPLETED) {
-            Object terminationStatus = task.getInputData().get("terminationStatus");
-            if ("COMPLETED".equals(terminationStatus)) {
-                workflowModel.setStatus(WorkflowModel.Status.COMPLETED);
-            } else if ("FAILED".equals(terminationStatus)) {
-                workflowModel.setStatus(WorkflowModel.Status.FAILED);
-            } else {
-                workflowModel.setStatus(WorkflowModel.Status.TERMINATED);
-            }
-        }
+        // Dispatch to the appropriate handler via the registry
+        TaskTypeHandler handler = handlerRegistry.getHandler(task.getTaskType());
+        handler.execute(task, workflowModel, executionContext);
 
         logger.debug("System task {} completed with status: {}",
                 task.getReferenceTaskName(), task.getStatus());

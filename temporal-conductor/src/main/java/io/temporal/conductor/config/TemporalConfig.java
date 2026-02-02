@@ -18,6 +18,7 @@ package io.temporal.conductor.config;
 
 import io.temporal.client.WorkflowClient;
 import io.temporal.conductor.activity.EventPublishActivity;
+import io.temporal.conductor.activity.ExtensionTaskExecutionActivityImpl;
 import io.temporal.conductor.activity.TaskExecutionActivitiesImpl;
 import io.temporal.conductor.workflow.ConductorWorkflowImpl;
 import io.temporal.conductor.workflow.DefinitionWorkflowImpl;
@@ -75,13 +76,15 @@ public class TemporalConfig {
      * @param workerFactory the worker factory
      * @param taskExecutionActivities the dynamic activity for task execution
      * @param eventPublishActivity the activity for EVENT task publishing
+     * @param extensionTaskActivity the activity for extension task execution
      * @return configured Worker
      */
     @Bean
     public Worker conductorWorker(
             WorkerFactory workerFactory,
             TaskExecutionActivitiesImpl taskExecutionActivities,
-            EventPublishActivity eventPublishActivity) {
+            EventPublishActivity eventPublishActivity,
+            ExtensionTaskExecutionActivityImpl extensionTaskActivity) {
         logger.info("Creating worker for task queue: {}", taskQueue);
         Worker worker = workerFactory.newWorker(taskQueue);
 
@@ -91,9 +94,11 @@ public class TemporalConfig {
                 DefinitionWorkflowImpl.class);
 
         // Register activity implementations (Spring beans with injected dependencies)
-        worker.registerActivitiesImplementations(taskExecutionActivities, eventPublishActivity);
+        worker.registerActivitiesImplementations(
+                taskExecutionActivities, eventPublishActivity, extensionTaskActivity);
 
-        logger.info("Worker configured with DynamicWorkflow and activities");
+        logger.info("Worker configured with DynamicWorkflow and activities (including {} extension tasks)",
+                extensionTaskActivity.getRegisteredTaskTypes().size());
         return worker;
     }
 
