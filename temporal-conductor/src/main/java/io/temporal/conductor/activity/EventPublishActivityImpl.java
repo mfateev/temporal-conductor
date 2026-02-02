@@ -19,11 +19,14 @@ package io.temporal.conductor.activity;
 import com.netflix.conductor.core.events.EventQueues;
 import com.netflix.conductor.core.events.queue.Message;
 import com.netflix.conductor.core.events.queue.ObservableQueue;
+import io.temporal.conductor.workflow.model.TaskExecutionResult;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
-
-import java.util.List;
 
 /**
  * Activity implementation for publishing events using Conductor's EventQueues infrastructure.
@@ -50,5 +53,24 @@ public class EventPublishActivityImpl implements EventPublishActivity {
         queue.publish(List.of(message));
 
         logger.debug("Event published successfully to queue '{}'", queueName);
+    }
+
+    @Override
+    public TaskExecutionResult executeEvent(String taskRefName, Map<String, Object> inputData) {
+        String queueName = (String) inputData.get("queueName");
+        String taskId = (String) inputData.get("taskId");
+        String payloadJson = (String) inputData.get("payloadJson");
+
+        logger.info("Executing event task '{}': queue={}, taskId={}", taskRefName, queueName, taskId);
+
+        try {
+            publish(queueName, taskId, payloadJson);
+            Map<String, Object> output = new HashMap<>();
+            output.put("event_produced", queueName);
+            return new TaskExecutionResult(output, "COMPLETED", null);
+        } catch (Exception e) {
+            logger.error("Event task '{}' failed: {}", taskRefName, e.getMessage(), e);
+            return new TaskExecutionResult(Collections.emptyMap(), "FAILED", e.getMessage());
+        }
     }
 }

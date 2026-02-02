@@ -18,6 +18,8 @@ package io.temporal.conductor.activity;
 
 import io.temporal.activity.ActivityInterface;
 import io.temporal.activity.ActivityMethod;
+import io.temporal.conductor.workflow.model.TaskExecutionResult;
+import java.util.Map;
 
 /**
  * Activity interface for publishing events from EVENT tasks.
@@ -35,4 +37,15 @@ public interface EventPublishActivity {
      */
     @ActivityMethod
     void publish(String queueName, String messageId, String payload);
+
+    /**
+     * Execute event publishing and return a TaskExecutionResult.
+     * This method is used by the EventTaskHandler for async activity execution.
+     *
+     * @param taskRefName the task reference name
+     * @param inputData the input data containing queueName, taskId, and payloadJson
+     * @return the task execution result
+     */
+    @ActivityMethod(name = "event-publish")
+    TaskExecutionResult executeEvent(String taskRefName, Map<String, Object> inputData);
 }

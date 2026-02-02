@@ -420,13 +420,15 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
 
         // Check if there are IN_PROGRESS system tasks that can progress without external events
         // (e.g., DO_WHILE ready for next iteration, vs WAIT waiting for timer/signal)
+        // EVENT tasks use activity execution mode and wait for activity completion
         boolean hasProgressableSystemTasks = workflowModel.getTasks().stream()
                 .anyMatch(t -> t.getStatus() == TaskModel.Status.IN_PROGRESS
                         && isSystemTask(t)
                         && !TaskType.WAIT.name().equals(t.getTaskType())
                         && !TaskType.HUMAN.name().equals(t.getTaskType())
                         && !TaskType.JOIN.name().equals(t.getTaskType())
-                        && !TaskType.SUB_WORKFLOW.name().equals(t.getTaskType()));
+                        && !TaskType.SUB_WORKFLOW.name().equals(t.getTaskType())
+                        && !TaskType.EVENT.name().equals(t.getTaskType()));
 
         // Log detailed task state for debugging
         if (logger.isDebugEnabled()) {
@@ -1194,14 +1196,15 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
                 .anyMatch(t -> t.getStatus() == TaskModel.Status.SCHEDULED);
 
         // Check for IN_PROGRESS system tasks that should trigger more work
-        // Exclude WAIT, JOIN, and SUB_WORKFLOW as they wait for async completion
+        // Exclude WAIT, JOIN, SUB_WORKFLOW, and EVENT as they wait for async completion
         boolean hasProgressableSystemTasks = workflowModel.getTasks().stream()
                 .anyMatch(t -> t.getStatus() == TaskModel.Status.IN_PROGRESS
                         && isSystemTask(t)
                         && !TaskType.WAIT.name().equals(t.getTaskType())
                         && !TaskType.HUMAN.name().equals(t.getTaskType())
                         && !TaskType.JOIN.name().equals(t.getTaskType())
-                        && !TaskType.SUB_WORKFLOW.name().equals(t.getTaskType()));
+                        && !TaskType.SUB_WORKFLOW.name().equals(t.getTaskType())
+                        && !TaskType.EVENT.name().equals(t.getTaskType()));
 
         if (iterations >= maxIterations && hasMoreScheduledTasks) {
             logger.info("executeNewlyScheduledTasks hit iteration limit ({}) with more tasks pending",
