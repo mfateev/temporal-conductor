@@ -135,6 +135,24 @@ See `design/` directory:
 git push origin <branch>
 ```
 
+## E2E Test Requirements
+
+**All tests in the `e2e-tests` module MUST be real E2E tests.** No fake E2E tests allowed.
+
+Real E2E tests:
+- Extend `AbstractE2ETest`
+- Run against Docker Compose stack (Temporal server + conductor-server)
+- Start workflows via REST API
+- Wait for workflow completion
+- Verify results through the API
+
+**DO NOT create:**
+- `@SpringBootTest` tests in `e2e-tests` module (use `temporal-conductor/src/test` for integration tests)
+- Tests that directly invoke activities or workflow implementations
+- Tests that mock Temporal or skip the Docker stack
+
+If you need to test component integration without Docker, put those tests in `temporal-conductor/src/test/java`, not in `e2e-tests`.
+
 ## Troubleshooting E2E Tests
 
 **Always use Temporal CLI first** to troubleshoot E2E test failures before diving into code. The Temporal CLI provides direct access to workflow history and state.
