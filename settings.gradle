@@ -1,2 +1,3 @@
 rootProject.name='temporal-conductor'
 include 'temporal-conductor'
+include 'e2e-tests'

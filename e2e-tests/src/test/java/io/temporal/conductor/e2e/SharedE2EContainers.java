@@ -60,7 +60,7 @@ public final class SharedE2EContainers {
     private final WebClient conductorClient;
 
     private SharedE2EContainers() {
-        File composeFile = new File("src/e2eTest/resources/docker-compose-e2e.yml");
+        File composeFile = new File("src/test/resources/docker-compose-e2e.yml");
         if (!composeFile.exists()) {
             throw new IllegalStateException("docker-compose-e2e.yml not found at: " + composeFile.getAbsolutePath());
         }

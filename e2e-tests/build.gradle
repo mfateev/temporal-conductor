@@ -1,0 +1,85 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.2.2' apply false
+    id 'io.spring.dependency-management' version '1.1.4'
+}
+
+group = 'io.temporal.conductor'
+version = '1.0-SNAPSHOT'
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencyManagement {
+    imports {
+        mavenBom org.springframework.boot.gradle.plugin.SpringBootPlugin.BOM_COORDINATES
+    }
+}
+
+dependencies {
+    // Core temporal-conductor module
+    testImplementation project(':temporal-conductor')
+
+    // Conductor extension tasks - add dependencies here to test them
+    testImplementation 'org.conductoross:conductor-json-jq-task:3.21.23'
+    // Future extensions:
+    // testImplementation 'org.conductoross:conductor-kafka:3.21.23'
+    // testImplementation 'org.conductoross:conductor-http-task:3.21.23'
+
+    // Conductor core (for WorkflowSystemTask and other types used in tests)
+    testImplementation 'org.conductoross:conductor-core:3.21.23'
+    testImplementation 'org.conductoross:conductor-common:3.21.23'
+
+    // Spring Boot for testing
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.boot:spring-boot-starter-web'
+
+    // Temporal SDK and testing
+    testImplementation 'io.temporal:temporal-sdk:1.25.0'
+    testImplementation 'io.temporal:temporal-testing:1.25.0'
+
+    // Testing
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+    testImplementation 'ch.qos.logback:logback-classic:1.4.14'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+    // E2E Testing - Testcontainers
+    testImplementation platform('org.testcontainers:testcontainers-bom:1.21.0')
+    testImplementation 'org.testcontainers:testcontainers'
+    testImplementation 'org.testcontainers:junit-jupiter'
+
+    // E2E Testing - HTTP client and utilities
+    testImplementation 'org.springframework.boot:spring-boot-starter-webflux'
+    testImplementation 'org.awaitility:awaitility:4.2.0'
+}
+
+test {
+    useJUnitPlatform()
+
+    // E2E tests may take longer
+    systemProperty 'junit.jupiter.execution.timeout.default', '5m'
+
+    testLogging {
+        events 'passed', 'skipped', 'failed'
+        showStandardStreams = true
+        exceptionFormat = 'full'
+    }
+}
+
+// Pre-build Docker image for E2E tests
+task buildE2EDockerImage(type: Exec) {
+    description = 'Builds the Docker image used by E2E tests'
+    group = 'verification'
+
+    workingDir rootProject.projectDir
+    commandLine 'docker', 'compose', '-f', 'e2e-tests/src/test/resources/docker-compose-e2e.yml', 'build'
+}
+
+// Make test task depend on Docker image build
+test.dependsOn buildE2EDockerImage
