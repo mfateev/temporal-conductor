@@ -72,6 +72,7 @@ public class TemporalWorkflowService implements WorkflowService {
 
     private final WorkflowClient workflowClient;
     private final MetadataService metadataService;
+    private final ConductorQueryTranslator queryTranslator;
     private final String taskQueue;
     private final String namespace;
 
@@ -80,16 +81,19 @@ public class TemporalWorkflowService implements WorkflowService {
      *
      * @param workflowClient the Temporal workflow client
      * @param metadataService the metadata service for workflow/task definitions
+     * @param queryTranslator the query translator for Conductor to Temporal queries
      * @param taskQueue the task queue for workflows
      * @param namespace the Temporal namespace
      */
     public TemporalWorkflowService(
             WorkflowClient workflowClient,
             MetadataService metadataService,
+            ConductorQueryTranslator queryTranslator,
             @Value("${temporal.task-queue:conductor-workflows}") String taskQueue,
             @Value("${temporal.namespace:conductor}") String namespace) {
         this.workflowClient = workflowClient;
         this.metadataService = metadataService;
+        this.queryTranslator = queryTranslator;
         this.taskQueue = taskQueue;
         this.namespace = namespace;
     }
@@ -333,47 +337,7 @@ public class TemporalWorkflowService implements WorkflowService {
     }
 
     private String buildTemporalQuery(String conductorQuery, String freeText) {
-        StringBuilder queryBuilder = new StringBuilder();
-        boolean hasClause = false;
-
-        if (conductorQuery != null && !conductorQuery.isEmpty() && !conductorQuery.equals("*")) {
-            String[] parts = conductorQuery.split("\\s+AND\\s+");
-            for (String part : parts) {
-                String[] keyValue = part.split(":", 2);
-                if (keyValue.length == 2) {
-                    String key = keyValue[0].trim();
-                    String value = keyValue[1].trim();
-
-                    if (hasClause) {
-                        queryBuilder.append(" AND ");
-                    }
-                    hasClause = true;
-
-                    switch (key.toLowerCase()) {
-                        case "status":
-                            queryBuilder.append("ConductorStatus = '").append(value).append("'");
-                            break;
-                        case "workflowtype":
-                            queryBuilder.append("WorkflowType = '").append(value).append("'");
-                            break;
-                        case "workflowid":
-                            queryBuilder.append("WorkflowId = '").append(value).append("'");
-                            break;
-                        default:
-                            if (key.startsWith("Conductor") || key.equals("WorkflowId") || key.equals("ExecutionStatus")) {
-                                queryBuilder.append(key).append(" = '").append(value).append("'");
-                            } else {
-                                hasClause = false; // Don't count unknown fields
-                            }
-                            break;
-                    }
-                }
-            }
-        }
-
-        String query = queryBuilder.length() > 0 ? queryBuilder.toString() : "";
-        logger.debug("Built Temporal query: {}", query);
-        return query;
+        return queryTranslator.translate(conductorQuery, freeText);
     }
 
     private WorkflowSummary convertToWorkflowSummary(WorkflowExecutionInfo info) {
