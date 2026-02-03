@@ -248,6 +248,9 @@ Address any issues found before proceeding to real implementation.
 
 **Goal**: Enable real workflow search by integrating Temporal's visibility API.
 
+> **Detailed Plan**: See [13-query-translation-plan.md](./13-query-translation-plan.md) for comprehensive
+> implementation details including query syntax, field mappings, and test cases.
+
 ### 3.1 Query Translation Layer
 
 Add `ConductorQueryTranslator` to translate Conductor query syntax to Temporal visibility queries:
@@ -263,10 +266,12 @@ public class ConductorQueryTranslator {
 
 Field mappings:
 - `workflowType` → `ConductorWorkflowType`
-- `status` → `ExecutionStatus` (with value translation: RUNNING→Running, COMPLETED→Completed)
+- `status` → `ConductorStatus` (no value translation needed - uses Conductor status values directly)
 - `correlationId` → `ConductorCorrelationId`
-- `startTime` → `StartTime`
-- `updateTime` → `CloseTime` (approximate)
+- `priority` → `ConductorPriority`
+- `version` → `ConductorWorkflowVersion`
+- `startTime` → `StartTime` (convert millis to RFC 3339)
+- `endTime` → `CloseTime` (convert millis to RFC 3339)
 
 ### 3.2 Visibility API Integration
 
