@@ -129,7 +129,22 @@ See `design/` directory:
 
 ## Git Workflow
 
-**Push after every commit**: Always push changes to `origin` immediately after making a commit.
+**Run ALL tests before pushing**: Before pushing any changes, you MUST run both unit tests and E2E tests to ensure nothing is broken.
+
+```bash
+# Run unit tests
+./gradlew :temporal-conductor:test
+
+# Run E2E tests (requires Docker)
+./gradlew :e2e-tests:test
+
+# Or run everything
+./gradlew test
+```
+
+**DO NOT push if any tests fail.** Fix the failing tests first.
+
+**Push after every commit**: After tests pass, push changes to `origin` immediately.
 
 ```bash
 git push origin <branch>
