@@ -474,6 +474,420 @@ curl -X POST http://localhost:8080/api/workflow \
 
 ---
 
+## Demo 5: Human Task (Manual Approval)
+
+HUMAN tasks wait indefinitely for manual approval or completion via signal or REST API.
+
+### Register Workflow with HUMAN Task
+
+```bash
+curl -X POST http://localhost:8080/api/metadata/workflow \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "approval_workflow",
+    "version": 1,
+    "tasks": [
+      {
+        "name": "approval_task",
+        "taskReferenceName": "approval_ref",
+        "type": "HUMAN",
+        "inputParameters": {
+          "requestId": "${workflow.input.requestId}",
+          "amount": "${workflow.input.amount}"
+        }
+      }
+    ]
+  }'
+```
+
+### Start Approval Workflow
+
+```bash
+curl -X POST http://localhost:8080/api/workflow \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "approval_workflow",
+    "version": 1,
+    "input": {"requestId": "REQ-12345", "amount": 5000}
+  }'
+```
+
+Save the workflow ID:
+```bash
+WORKFLOW_ID=<returned-id>
+```
+
+### Check HUMAN Task Status
+
+```bash
+# Get workflow status - HUMAN task will be IN_PROGRESS
+curl http://localhost:8080/api/workflow/$WORKFLOW_ID | jq '.tasks[] | select(.taskReferenceName=="approval_ref")'
+```
+
+### Complete HUMAN Task via REST API
+
+```bash
+# Get the taskId from the workflow status first
+TASK_ID=$(curl -s http://localhost:8080/api/workflow/$WORKFLOW_ID | jq -r '.tasks[] | select(.taskReferenceName=="approval_ref") | .taskId')
+
+# Complete the task
+curl -X POST http://localhost:8080/api/tasks \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"taskId\": \"$TASK_ID\",
+    \"workflowInstanceId\": \"$WORKFLOW_ID\",
+    \"status\": \"COMPLETED\",
+    \"outputData\": {\"approved\": true, \"approver\": \"manager@company.com\"}
+  }"
+```
+
+### Verify Completion
+
+```bash
+curl http://localhost:8080/api/workflow/$WORKFLOW_ID | jq '{status, output}'
+```
+
+---
+
+## Demo 6: Sub-Workflow (Nested Workflows)
+
+SUB_WORKFLOW tasks invoke other workflows, enabling modular workflow composition.
+
+### Register Child Workflow
+
+```bash
+# Task for child workflow
+curl -X POST http://localhost:8080/api/metadata/taskdefs \
+  -H "Content-Type: application/json" \
+  -d '[{"name": "child_task", "timeoutSeconds": 0}]'
+
+# Child workflow definition
+curl -X POST http://localhost:8080/api/metadata/workflow \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "child_workflow",
+    "version": 1,
+    "tasks": [
+      {
+        "name": "child_task",
+        "taskReferenceName": "child_task_ref",
+        "type": "SIMPLE"
+      }
+    ],
+    "outputParameters": {
+      "childResult": "${child_task_ref.output}"
+    }
+  }'
+```
+
+### Register Parent Workflow with SUB_WORKFLOW
+
+```bash
+curl -X POST http://localhost:8080/api/metadata/workflow \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "parent_workflow",
+    "version": 1,
+    "tasks": [
+      {
+        "name": "sub_workflow_task",
+        "taskReferenceName": "sub_workflow_ref",
+        "type": "SUB_WORKFLOW",
+        "subWorkflowParam": {
+          "name": "child_workflow",
+          "version": 1
+        },
+        "inputParameters": {
+          "workflowInput": "${workflow.input}"
+        }
+      }
+    ],
+    "outputParameters": {
+      "parentResult": "${sub_workflow_ref.output}"
+    }
+  }'
+```
+
+### Start Parent Workflow
+
+```bash
+curl -X POST http://localhost:8080/api/workflow \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "parent_workflow",
+    "version": 1,
+    "input": {"message": "Hello from parent"}
+  }'
+```
+
+### View in Temporal UI
+
+In the Temporal UI, you'll see two workflows:
+1. The parent workflow (parent_workflow)
+2. The child workflow (child_workflow) - started by the parent
+
+---
+
+## Demo 7: JSON_JQ_TRANSFORM (Data Transformation)
+
+Transform data without writing code using JQ expressions.
+
+### Register JQ Transform Workflow
+
+```bash
+curl -X POST http://localhost:8080/api/metadata/workflow \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "jq_transform_workflow",
+    "version": 1,
+    "tasks": [
+      {
+        "name": "transform_data",
+        "taskReferenceName": "jq_transform_ref",
+        "type": "JSON_JQ_TRANSFORM",
+        "inputParameters": {
+          "queryExpression": "{ fullName: (.data.firstName + \" \" + .data.lastName), location: .data.city, isAdult: (.data.age >= 18) }",
+          "data": "${workflow.input}"
+        }
+      }
+    ],
+    "outputParameters": {
+      "transformed": "${jq_transform_ref.output.result}"
+    }
+  }'
+```
+
+### Start JQ Transform Workflow
+
+```bash
+curl -X POST http://localhost:8080/api/workflow \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "jq_transform_workflow",
+    "version": 1,
+    "input": {
+      "firstName": "John",
+      "lastName": "Doe",
+      "age": 30,
+      "city": "New York"
+    }
+  }'
+```
+
+### Example: Sum Array Values
+
+```bash
+# Register workflow that sums array values
+curl -X POST http://localhost:8080/api/metadata/workflow \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "sum_values_workflow",
+    "version": 1,
+    "tasks": [
+      {
+        "name": "sum_task",
+        "taskReferenceName": "sum_ref",
+        "type": "JSON_JQ_TRANSFORM",
+        "inputParameters": {
+          "queryExpression": "[.data.items[].value] | add",
+          "data": "${workflow.input}"
+        }
+      }
+    ]
+  }'
+
+# Start with array input
+curl -X POST http://localhost:8080/api/workflow \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "sum_values_workflow",
+    "version": 1,
+    "input": {
+      "items": [
+        {"id": 1, "value": 10},
+        {"id": 2, "value": 20},
+        {"id": 3, "value": 30}
+      ]
+    }
+  }'
+```
+
+---
+
+## Demo 8: EVENT Task (Publish Events)
+
+EVENT tasks publish messages to external systems (SQS, Kafka, etc.).
+
+### Register EVENT Workflow
+
+```bash
+curl -X POST http://localhost:8080/api/metadata/workflow \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "event_workflow",
+    "version": 1,
+    "tasks": [
+      {
+        "name": "publish_event",
+        "taskReferenceName": "event_ref",
+        "type": "EVENT",
+        "sink": "conductor:order-events",
+        "inputParameters": {
+          "orderId": "${workflow.input.orderId}",
+          "customerId": "${workflow.input.customerId}",
+          "eventType": "ORDER_CREATED"
+        }
+      }
+    ]
+  }'
+```
+
+### Start EVENT Workflow
+
+```bash
+curl -X POST http://localhost:8080/api/workflow \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "event_workflow",
+    "version": 1,
+    "input": {"orderId": "ORD-12345", "customerId": "CUST-789"}
+  }'
+```
+
+### Supported Sink Formats
+
+| Sink Format | Example | Description |
+|-------------|---------|-------------|
+| `conductor:` | `conductor:my-event` | Internal Conductor event |
+| `sqs:` | `sqs:my-sqs-queue` | Amazon SQS |
+| `kafka:` | `kafka:order-topic` | Apache Kafka |
+
+---
+
+## Demo 9: Pause and Resume Workflow
+
+Control workflow execution by pausing and resuming.
+
+### Start a Slow Workflow
+
+```bash
+# Register slow task
+curl -X POST http://localhost:8080/api/metadata/taskdefs \
+  -H "Content-Type: application/json" \
+  -d '[{"name": "slow_task", "timeoutSeconds": 0}]'
+
+# Register workflow with slow task
+curl -X POST http://localhost:8080/api/metadata/workflow \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "pausable_workflow",
+    "version": 1,
+    "tasks": [
+      {
+        "name": "slow_task",
+        "taskReferenceName": "slow_task_ref",
+        "type": "SIMPLE",
+        "inputParameters": {"delayMs": 30000}
+      }
+    ]
+  }'
+
+# Start workflow
+WORKFLOW_ID=$(curl -s -X POST http://localhost:8080/api/workflow \
+  -H "Content-Type: application/json" \
+  -d '{"name": "pausable_workflow", "version": 1, "input": {}}' | tr -d '"')
+
+echo "Workflow ID: $WORKFLOW_ID"
+```
+
+### Pause the Workflow
+
+```bash
+# Pause
+curl -X PUT "http://localhost:8080/api/workflow/$WORKFLOW_ID/pause"
+
+# Check status - should be PAUSED
+curl http://localhost:8080/api/workflow/$WORKFLOW_ID/status | jq '.status'
+```
+
+### Resume the Workflow
+
+```bash
+# Resume
+curl -X PUT "http://localhost:8080/api/workflow/$WORKFLOW_ID/resume"
+
+# Check status - should be RUNNING
+curl http://localhost:8080/api/workflow/$WORKFLOW_ID/status | jq '.status'
+```
+
+### View in Temporal UI
+
+When paused, the workflow's `ConductorStatus` search attribute shows `PAUSED`.
+
+---
+
+## Advanced Search Queries
+
+The search API supports SQL-like query syntax with AND conditions, IN clauses, and more.
+
+### Search by Status
+
+```bash
+# Using equals syntax
+curl "http://localhost:8080/api/workflow/search?query=status=COMPLETED"
+
+# Using legacy colon syntax
+curl "http://localhost:8080/api/workflow/search?query=status:RUNNING"
+```
+
+### Search by Workflow Type
+
+```bash
+curl "http://localhost:8080/api/workflow/search?query=workflowType=greeting_workflow"
+```
+
+### Search with AND Conditions
+
+```bash
+# Find completed workflows of a specific type
+curl "http://localhost:8080/api/workflow/search?query=status=COMPLETED%20AND%20workflowType=greeting_workflow"
+```
+
+### Search with IN Clause
+
+```bash
+# Find workflows with multiple statuses
+curl "http://localhost:8080/api/workflow/search?query=status%20IN%20(RUNNING,PAUSED)"
+```
+
+### Search by Correlation ID
+
+```bash
+curl "http://localhost:8080/api/workflow/search?query=correlationId=order-12345"
+```
+
+### Supported Query Fields
+
+| Field | Description | Example |
+|-------|-------------|---------|
+| `status` | Workflow status | `status=COMPLETED` |
+| `workflowType` | Workflow definition name | `workflowType=my_workflow` |
+| `correlationId` | Correlation identifier | `correlationId=order-123` |
+| `startTime` | Start timestamp (ms) | `startTime>1704067200000` |
+| `updateTime` | Last update timestamp | `updateTime>1704067200000` |
+
+### Supported Operators
+
+| Operator | Example |
+|----------|---------|
+| `=` | `status=RUNNING` |
+| `!=` | `status!=FAILED` |
+| `>`, `<`, `>=`, `<=` | `startTime>1704067200000` |
+| `IN` | `status IN (RUNNING, PAUSED)` |
+| `AND` | `status=COMPLETED AND workflowType=my_wf` |
+
+---
+
 ## API Quick Reference
 
 ### Metadata Operations
@@ -549,11 +963,28 @@ curl -X PUT http://localhost:8080/api/workflow/{workflowId}/resume
 - Show **Stack Trace** tab during activity execution
 - Show **Queries** tab to query workflow state
 
-### 5. Key Benefits
+### 5. Key Features to Highlight
+
+| Feature | Demo | Key Point |
+|---------|------|-----------|
+| **Sequential Tasks** | Demo 1 | Tasks execute in order |
+| **Parallel Execution** | Demo 2 | FORK_JOIN runs tasks concurrently |
+| **Conditional Logic** | Demo 3 | SWITCH routes based on input |
+| **Loops** | Demo 4 | DO_WHILE iterates until condition |
+| **Human Approval** | Demo 5 | HUMAN tasks wait for manual completion |
+| **Modular Workflows** | Demo 6 | SUB_WORKFLOW enables composition |
+| **Data Transformation** | Demo 7 | JSON_JQ_TRANSFORM without code |
+| **Event Publishing** | Demo 8 | EVENT sends to SQS/Kafka/etc |
+| **Flow Control** | Demo 9 | Pause/resume running workflows |
+| **Search** | Advanced Search | SQL-like queries with AND, IN |
+
+### 6. Key Benefits
 - **Durability**: Temporal's event sourcing survives crashes
 - **Scalability**: Temporal scales to millions of workflows
 - **Observability**: Full execution history in Temporal UI
 - **Compatibility**: Run existing Conductor workflows unchanged
+- **Human-in-the-Loop**: HUMAN tasks for approvals and manual steps
+- **Extensibility**: JSON_JQ_TRANSFORM for codeless data transformation
 
 ---
 
