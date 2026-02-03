@@ -235,118 +235,126 @@ Address any issues found before proceeding to real implementation.
 
 ---
 
-## Phase 3: Temporal DAO Implementations
+## Phase 3: Query Translation & Visibility Integration
 
-**Goal**: Implement Conductor DAO interfaces using Temporal APIs.
+> **Architecture Note**: The original plan called for `TemporalExecutionDAO` and `TemporalIndexDAO`
+> implementations. However, the current architecture **does not need separate DAOs** because:
+> 1. The service layer (`TemporalWorkflowService`, etc.) talks directly to Temporal via `WorkflowClient`
+> 2. Workflow state is maintained in-memory within the workflow, exposed via query methods
+> 3. Temporal provides durability through event history replay
+>
+> Instead, this phase focuses on enhancing the existing service layer with query translation
+> and Temporal visibility API integration.
 
-### 3.1 TemporalExecutionDAO
+**Goal**: Enable real workflow search by integrating Temporal's visibility API.
 
-Implements `ExecutionDAO` interface:
+### 3.1 Query Translation Layer
 
-| Method | Temporal Implementation |
-|--------|------------------------|
-| `getWorkflow(id)` | Query workflow via `@QueryMethod` |
-| `getRunningWorkflowIds(name)` | Visibility: `ConductorWorkflowType = X AND ExecutionStatus = 'Running'` |
-| `getWorkflowsByCorrelationId(id)` | Visibility: `ConductorCorrelationId = X` |
-| `createWorkflow(model)` | Start Temporal workflow |
-| `updateWorkflow(model)` | Signal workflow (if needed) |
-| `removeWorkflow(id)` | Terminate workflow |
+Add `ConductorQueryTranslator` to translate Conductor query syntax to Temporal visibility queries:
 
-### 3.2 TemporalIndexDAO
-
-Implements `IndexDAO` interface:
-
-| Method | Temporal Implementation |
-|--------|------------------------|
-| `searchWorkflows(query)` | Translate to Visibility List Filter |
-| `searchWorkflowSummary(query)` | Visibility query + map to `WorkflowSummary` |
-| `getWorkflowCount(query)` | Visibility count query |
-
-Query translation layer:
-```kotlin
-class ConductorQueryTranslator {
+```java
+@Component
+public class ConductorQueryTranslator {
     // Conductor: "workflowType = 'order' AND status IN (RUNNING, PAUSED)"
     // Temporal:  "ConductorWorkflowType = 'order' AND ExecutionStatus IN ('Running', 'Paused')"
-    fun translate(conductorQuery: String): String
+    public String translate(String conductorQuery);
 }
 ```
 
 Field mappings:
 - `workflowType` → `ConductorWorkflowType`
-- `status` → `ExecutionStatus` (with value translation)
+- `status` → `ExecutionStatus` (with value translation: RUNNING→Running, COMPLETED→Completed)
 - `correlationId` → `ConductorCorrelationId`
 - `startTime` → `StartTime`
 - `updateTime` → `CloseTime` (approximate)
 
-### 3.3 TemporalMetadataDAO
+### 3.2 Visibility API Integration
 
-**Option A: In-Memory with Workflow Backup** (Recommended for simplicity)
+Enhance `TemporalWorkflowService.searchWorkflows()` to use Temporal visibility:
 
-```kotlin
-class TemporalMetadataDAO : MetadataDAO {
-    // In-memory cache for fast reads
-    private val workflowDefs = ConcurrentHashMap<String, WorkflowDef>()
-    private val taskDefs = ConcurrentHashMap<String, TaskDef>()
+```java
+@Override
+public SearchResult<WorkflowSummary> searchWorkflows(String query, String freeText, int start, int size) {
+    String temporalQuery = queryTranslator.translate(query);
 
-    // Persist to Temporal workflow for durability
-    private val registryWorkflow: MetadataRegistryWorkflow
+    ListWorkflowExecutionsRequest request = ListWorkflowExecutionsRequest.newBuilder()
+        .setNamespace(namespace)
+        .setQuery(temporalQuery)
+        .setPageSize(size)
+        .build();
 
-    override fun createWorkflowDef(def: WorkflowDef) {
-        workflowDefs["${def.name}:${def.version}"] = def
-        registryWorkflow.updateWorkflowDef(def)  // Signal for durability
-    }
+    ListWorkflowExecutionsResponse response = workflowServiceStubs
+        .blockingStub()
+        .listWorkflowExecutions(request);
+
+    List<WorkflowSummary> results = response.getExecutionsList().stream()
+        .map(this::toWorkflowSummary)
+        .collect(toList());
+
+    return new SearchResult<>(results, response.getExecutionsCount());
 }
 ```
 
-**Option B: Definition Workflows** (More scalable)
-- Each definition stored as a long-running workflow
-- WorkflowId: `conductor-def:workflow:{name}:{version}`
-- Better for large numbers of definitions
+### 3.3 Metadata Storage (Already Implemented)
+
+Metadata is stored in-memory with the service layer:
+- `TemporalMetadataService` maintains `ConcurrentHashMap` for workflow/task definitions
+- Definitions are passed to workflows at start time via `ConductorWorkflowInput`
+- No separate persistence needed (definitions can be re-registered on restart)
 
 ### Deliverables
-- `TemporalExecutionDAO` implementation
-- `TemporalIndexDAO` implementation with query translator
-- `TemporalMetadataDAO` implementation
-- Unit tests for each DAO
+- `ConductorQueryTranslator` implementation
+- Updated `TemporalWorkflowService.searchWorkflows()` with visibility API
+- Updated `TemporalWorkflowService.getRunningWorkflows()` with visibility API
+- Unit tests for query translation
 - Integration tests with Temporal test server
 
 ---
 
-## Phase 4: Service Layer Integration
+## Phase 4: Remaining API Endpoints
 
-**Goal**: Connect REST API to real Temporal backend by replacing stubs with real services.
+**Goal**: Implement any remaining API endpoints not yet functional.
 
-### 4.1 TemporalWorkflowService
+### 4.1 Current Status
 
-Replace `StubWorkflowService` with real implementation:
+Already implemented and working:
+- Start/Get/Terminate/Pause/Resume workflow
+- Restart/Retry workflow
+- Get workflow status
+- Search workflows (stub - needs visibility integration from Phase 3)
+- All metadata CRUD operations
+- Task get/update/poll operations
 
-```kotlin
+### 4.2 Remaining Endpoints
+
+| Endpoint | Status | Notes |
+|----------|--------|-------|
+| `POST /api/workflow/{id}/rerun` | Not implemented | Rerun completed workflow |
+| `POST /api/workflow/{id}/skiptask/{ref}` | Not implemented | Skip a task |
+| Real search (not stub) | Phase 3 | Needs query translation |
+
+### 4.3 TemporalWorkflowService (Current Architecture)
+
+The service layer talks directly to Temporal without DAOs:
+
+```java
 @Service
-class TemporalWorkflowService(
-    private val temporalClient: WorkflowClient,
-    private val executionDAO: TemporalExecutionDAO,
-    private val indexDAO: TemporalIndexDAO,
-    private val metadataDAO: TemporalMetadataDAO
-) : WorkflowService {
+public class TemporalWorkflowService implements WorkflowService {
+    private final WorkflowClient workflowClient;
+    private final WorkflowServiceStubs workflowServiceStubs;
+    private final MetadataService metadataService;
 
-    override fun startWorkflow(request: StartWorkflowRequest): String {
-        val workflowDef = metadataDAO.getWorkflowDef(request.name, request.version)
-        val options = WorkflowOptions.newBuilder()
-            .setWorkflowId(request.workflowId ?: UUID.randomUUID().toString())
-            .setTaskQueue("conductor-workflows")
-            .setSearchAttributes(buildSearchAttributes(request, workflowDef))
-            .build()
+    // Start workflow: WorkflowClient.newWorkflowStub().start()
+    // Get workflow: Query via workflow stub
+    // Pause/Resume: Signal via workflow stub
+    // Search: Visibility API (after Phase 3)
+}
+```
 
-        val workflow = temporalClient.newWorkflowStub(ConductorWorkflow::class.java, options)
-        WorkflowClient.start(workflow::execute, toConductorInput(workflowDef, request))
-        return options.workflowId
-    }
-
-    override fun getExecutionStatus(workflowId: String, includeTasks: Boolean): Workflow {
-        return executionDAO.getWorkflow(workflowId, includeTasks)
-    }
-
-    override fun searchWorkflows(query: String, freeText: String?, start: Int, size: Int): SearchResult {
+### Deliverables
+- Rerun workflow endpoint
+- Skip task endpoint (if needed)
+- Integration of Phase 3 query translation
         return indexDAO.searchWorkflows(query, freeText, start, size)
     }
 
@@ -514,33 +522,36 @@ Re-run UI validation from Phase 2.5 with real backend:
 
 ## Summary
 
-| Phase | Focus | Key Deliverable |
-|-------|-------|-----------------|
-| **1** | Workflow Observability | Search attributes + query methods |
-| **2** | REST API (Stubs) | Conductor-compatible endpoints with mock data |
-| **2.5** | UI Validation | Confirm UI works before building backend |
-| **3** | Temporal DAOs | ExecutionDAO, IndexDAO, MetadataDAO |
-| **4** | Service Integration | Connect REST to real Temporal backend |
-| **5** | Full Integration | End-to-end testing with UI |
-| **6** | Production | Deployment & monitoring |
+| Phase | Focus | Key Deliverable | Status |
+|-------|-------|-----------------|--------|
+| **1** | Workflow Observability | Search attributes + query methods | ✅ Done |
+| **2** | REST API (Stubs) | Conductor-compatible endpoints with mock data | ✅ Done |
+| **2.5** | UI Validation | Confirm UI works before building backend | Pending |
+| **3** | Query Translation | Visibility API integration for real search | Pending |
+| **4** | Remaining Endpoints | Rerun, skip task, etc. | Pending |
+| **5** | Full Integration | End-to-end testing with UI | Pending |
+| **6** | Production | Deployment & monitoring | Pending |
 
-## Dependencies (REST-First Approach)
+> **Note**: The original Phase 3 (Temporal DAOs) was removed. The service layer
+> talks directly to Temporal via `WorkflowClient` - no intermediate DAO layer needed.
+> Workflow state is maintained in-memory within the workflow itself.
+
+## Dependencies
 
 ```
-Phase 1: Workflow Observability
+Phase 1: Workflow Observability     ✅ DONE
     │
-    ├──────────────────────────────────┐
-    │                                  │
-    ▼                                  ▼
-Phase 2: REST API (Stubs)         Phase 3: Temporal DAOs
-    │                                  │
-    ▼                                  │
-Phase 2.5: UI Validation               │
-    │                                  │
-    │   ┌──────────────────────────────┘
-    │   │
-    ▼   ▼
-Phase 4: Service Integration
+    ▼
+Phase 2: REST API (Stubs)           ✅ DONE
+    │
+    ▼
+Phase 2.5: UI Validation            ← Next step
+    │
+    ▼
+Phase 3: Query Translation          ← Enables real search
+    │
+    ▼
+Phase 4: Remaining Endpoints
     │
     ▼
 Phase 5: Full Integration
@@ -549,22 +560,21 @@ Phase 5: Full Integration
 Phase 6: Production
 ```
 
-**Benefits of REST-First:**
-1. Early UI validation before complex backend work
-2. Clear API contract defined upfront
-3. Parallel development of DAOs while testing UI
-4. Fast feedback on compatibility issues
-5. Stub mode useful for UI development/demos
+**Current Architecture:**
+- REST API → Service Layer → Temporal WorkflowClient → Workflow (in-memory state)
+- No DAOs needed - services talk directly to Temporal
+- Workflow maintains all state, exposed via query methods
+- Temporal provides durability through event history replay
 
 ## Estimated Effort
 
 | Phase | Complexity | Notes |
 |-------|------------|-------|
-| 1 | Low | Extend existing workflow |
-| 2 | Medium | Many endpoints, realistic stubs |
+| 1 | Low | ✅ Complete |
+| 2 | Medium | ✅ Complete |
 | 2.5 | Low | Testing checkpoint |
-| 3 | Medium | Query translation is the challenge |
-| 4 | Low | Wire up existing pieces |
+| 3 | Medium | Query translation is the main work |
+| 4 | Low | Just a few endpoints |
 | 5 | Medium | Integration testing takes time |
 | 6 | Low-Medium | Standard production prep |
 
