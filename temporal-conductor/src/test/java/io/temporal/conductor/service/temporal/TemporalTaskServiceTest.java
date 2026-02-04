@@ -99,7 +99,7 @@ class TemporalTaskServiceTest {
         metadataService = new TemporalMetadataService(client, new ObjectMapper(),
                 TASK_QUEUE, NAMESPACE);
         workflowService = new TemporalWorkflowService(
-                client, metadataService, TASK_QUEUE, NAMESPACE);
+                client, metadataService, new ConductorQueryTranslator(), TASK_QUEUE, NAMESPACE);
     }
 
     @AfterEach

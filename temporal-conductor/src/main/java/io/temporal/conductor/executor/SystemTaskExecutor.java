@@ -20,9 +20,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.netflix.conductor.common.metadata.tasks.TaskType;
 import com.netflix.conductor.core.config.ConductorProperties;
 import com.netflix.conductor.core.execution.DeciderService;
+import com.netflix.conductor.core.events.EventQueueProvider;
+import com.netflix.conductor.core.events.EventQueues;
 import com.netflix.conductor.core.execution.tasks.Decision;
 import com.netflix.conductor.core.execution.tasks.DoWhile;
+import com.netflix.conductor.core.execution.tasks.Event;
 import com.netflix.conductor.core.execution.tasks.Fork;
+import com.netflix.conductor.core.execution.tasks.Human;
 import com.netflix.conductor.core.execution.tasks.Join;
 import com.netflix.conductor.core.execution.tasks.SetVariable;
 import com.netflix.conductor.core.execution.tasks.Switch;
@@ -53,7 +57,6 @@ public class SystemTaskExecutor {
 
     private static final Logger logger = LoggerFactory.getLogger(SystemTaskExecutor.class);
 
-    // Task types that are handled by system tasks
     private static final Set<String> SYSTEM_TASK_TYPES = new HashSet<>();
 
     static {
@@ -67,6 +70,10 @@ public class SystemTaskExecutor {
         SYSTEM_TASK_TYPES.add(TaskType.DO_WHILE.name());
         SYSTEM_TASK_TYPES.add(TaskType.EXCLUSIVE_JOIN.name());
         SYSTEM_TASK_TYPES.add(TaskType.WAIT.name());
+        SYSTEM_TASK_TYPES.add(TaskType.SUB_WORKFLOW.name());
+        SYSTEM_TASK_TYPES.add(TaskType.START_WORKFLOW.name());
+        SYSTEM_TASK_TYPES.add(TaskType.EVENT.name());
+        SYSTEM_TASK_TYPES.add(TaskType.HUMAN.name());
     }
 
     private final InMemoryWorkflowExecutor inMemoryWorkflowExecutor;
@@ -109,7 +116,6 @@ public class SystemTaskExecutor {
         this.inMemoryExecutionDaoFacade = new InMemoryExecutionDAOFacade(objectMapper);
         ParametersUtils parametersUtils = new ParametersUtils(objectMapper);
 
-        // Register system tasks using Conductor's native implementations
         this.systemTasks = new HashMap<>();
         Fork fork = new Fork();
         systemTasks.put(TaskType.FORK_JOIN.name(), fork);
@@ -123,6 +129,7 @@ public class SystemTaskExecutor {
         systemTasks.put(TaskType.DO_WHILE.name(),
                 new DoWhile(parametersUtils, inMemoryExecutionDaoFacade));
         systemTasks.put(TaskType.WAIT.name(), new Wait());
+        systemTasks.put(TaskType.HUMAN.name(), new Human());
 
         this.systemTaskRegistry = new SystemTaskRegistry(new HashSet<>(systemTasks.values()));
     }
@@ -163,23 +170,33 @@ public class SystemTaskExecutor {
 
         WorkflowSystemTask systemTask = systemTaskRegistry.get(task.getTaskType());
 
-        logger.debug("Executing system task: {} ({})",
-                task.getReferenceTaskName(), task.getTaskType());
+        if (TaskType.DO_WHILE.name().equals(task.getTaskType())) {
+            logger.info("DO_WHILE execute: task={}, status={}, iteration={}, workflowTask={}",
+                    task.getReferenceTaskName(), task.getStatus(), task.getIteration(),
+                    task.getWorkflowTask() != null ? task.getWorkflowTask().getLoopCondition() : "null");
+        } else {
+            logger.debug("Executing system task: {} ({})",
+                    task.getReferenceTaskName(), task.getTaskType());
+        }
 
-        // Call start() first if task is SCHEDULED
         if (task.getStatus() == TaskModel.Status.SCHEDULED) {
             systemTask.start(workflow, task, inMemoryWorkflowExecutor);
-            // Set to IN_PROGRESS if start() didn't change status
             if (task.getStatus() == TaskModel.Status.SCHEDULED) {
                 task.setStatus(TaskModel.Status.IN_PROGRESS);
             }
         }
 
-        // Call execute() if task is not terminal
         if (!task.getStatus().isTerminal()) {
             boolean statusChanged = systemTask.execute(workflow, task, inMemoryWorkflowExecutor);
-            logger.debug("System task {} execute() returned: {}, status: {}",
-                    task.getReferenceTaskName(), statusChanged, task.getStatus());
+
+            if (TaskType.DO_WHILE.name().equals(task.getTaskType())) {
+                logger.info("DO_WHILE after execute: task={}, statusChanged={}, status={}, iteration={}, outputData={}",
+                        task.getReferenceTaskName(), statusChanged, task.getStatus(),
+                        task.getIteration(), task.getOutputData());
+            } else {
+                logger.debug("System task {} execute() returned: {}, status: {}",
+                        task.getReferenceTaskName(), statusChanged, task.getStatus());
+            }
             return statusChanged;
         }
 

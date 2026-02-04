@@ -8,17 +8,25 @@ FROM eclipse-temurin:21-jdk-alpine AS builder
 
 WORKDIR /app
 
-# Copy Gradle wrapper and build files
+# Copy Gradle wrapper first - this layer is cached if gradlew/gradle don't change
 COPY gradlew .
 COPY gradle gradle
+
+# Download Gradle wrapper (cached layer - only re-downloads if gradle-wrapper.properties changes)
+RUN chmod +x gradlew && ./gradlew --version
+
+# Copy build files (changes less frequently than source code)
 COPY build.gradle .
 COPY settings.gradle .
 
-# Copy source code
+# Download dependencies (cached layer - only re-downloads if build files change)
+RUN ./gradlew dependencies --no-daemon || true
+
+# Copy source code (changes most frequently)
 COPY temporal-conductor temporal-conductor
 
 # Build the server JAR (skip tests for faster build)
-RUN chmod +x gradlew && ./gradlew :temporal-conductor:bootJar --no-daemon -x test
+RUN ./gradlew :temporal-conductor:bootJar --no-daemon -x test
 
 # ==============================================================================
 # Stage 2: Runtime image

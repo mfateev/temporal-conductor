@@ -33,6 +33,8 @@ public class ConductorWorkflowInput {
     private String workflowDefJson = "";
     private Map<String, Object> workflowInput = Collections.emptyMap();
     private Map<String, String> taskDefsJson = Collections.emptyMap();
+    // Additional workflow definitions for SUB_WORKFLOW tasks (keyed by "name:version")
+    private Map<String, String> workflowDefsJson = Collections.emptyMap();
 
     // Metadata for search attributes
     private String correlationId;
@@ -40,6 +42,9 @@ public class ConductorWorkflowInput {
     private String ownerApp;
     private String createdBy;
     private List<String> tags;
+
+    // Continue-as-new checkpoint (null for fresh workflows)
+    private ContinueAsNewCheckpoint checkpoint;
 
     /** Default constructor for Jackson. */
     public ConductorWorkflowInput() {
@@ -56,6 +61,10 @@ public class ConductorWorkflowInput {
 
     public Map<String, String> getTaskDefsJson() {
         return taskDefsJson;
+    }
+
+    public Map<String, String> getWorkflowDefsJson() {
+        return workflowDefsJson;
     }
 
     public String getCorrelationId() {
@@ -78,6 +87,10 @@ public class ConductorWorkflowInput {
         return tags;
     }
 
+    public ContinueAsNewCheckpoint getCheckpoint() {
+        return checkpoint;
+    }
+
     // Setters
     public void setWorkflowDefJson(String workflowDefJson) {
         this.workflowDefJson = workflowDefJson;
@@ -89,6 +102,10 @@ public class ConductorWorkflowInput {
 
     public void setTaskDefsJson(Map<String, String> taskDefsJson) {
         this.taskDefsJson = taskDefsJson;
+    }
+
+    public void setWorkflowDefsJson(Map<String, String> workflowDefsJson) {
+        this.workflowDefsJson = workflowDefsJson;
     }
 
     public void setCorrelationId(String correlationId) {
@@ -109,6 +126,10 @@ public class ConductorWorkflowInput {
 
     public void setTags(List<String> tags) {
         this.tags = tags;
+    }
+
+    public void setCheckpoint(ContinueAsNewCheckpoint checkpoint) {
+        this.checkpoint = checkpoint;
     }
 
     /**
@@ -139,6 +160,11 @@ public class ConductorWorkflowInput {
             return this;
         }
 
+        public Builder workflowDefsJson(Map<String, String> workflowDefsJson) {
+            input.workflowDefsJson = workflowDefsJson;
+            return this;
+        }
+
         public Builder correlationId(String correlationId) {
             input.correlationId = correlationId;
             return this;
@@ -161,6 +187,11 @@ public class ConductorWorkflowInput {
 
         public Builder tags(List<String> tags) {
             input.tags = tags;
+            return this;
+        }
+
+        public Builder checkpoint(ContinueAsNewCheckpoint checkpoint) {
+            input.checkpoint = checkpoint;
             return this;
         }
 
