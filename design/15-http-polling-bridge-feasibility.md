@@ -132,11 +132,11 @@ public class ActivityPollingBridge {
             @RequestParam(defaultValue = "30000") long timeout) {
 
         // Build Temporal poll request
-        // taskType maps to Temporal activity type
+        // taskType directly maps to Temporal task queue name (1:1)
         PollActivityTaskQueueRequest request = PollActivityTaskQueueRequest.newBuilder()
             .setNamespace(namespace)
             .setTaskQueue(TaskQueue.newBuilder()
-                .setName(getTaskQueueForTaskType(taskType))
+                .setName(taskType)  // Task type IS the task queue name
                 .build())
             .setIdentity(workerid != null ? workerid : "conductor-worker")
             .build();
@@ -257,10 +257,9 @@ public class ActivityPollingBridge {
 
 | Challenge | Solution | Complexity |
 |-----------|----------|------------|
-| Task type → Task queue mapping | Convention or configuration | Low |
+| Task type → Task queue mapping | 1:1 mapping: task type = task queue name | Low |
 | Payload format conversion | JSON ↔ Temporal Payloads | Low |
-| Activity type registration | Dynamic activity or predefined | Medium |
-| Workflow ↔ Activity coupling | Activities must be scheduled by workflow | Medium |
+| Workflow scheduling | Schedule activities to task-type-named queues | Low |
 
 ### Option 2: Async Activity Completion Bridge (Alternative)
 
@@ -298,55 +297,70 @@ This approach has higher complexity due to the need for:
 
 **Use this approach if:** You need to support workflows that don't know about Conductor task types at definition time.
 
-## Key Integration Point: Activity Type Registration
+## Key Integration Point: Task Type to Task Queue Mapping
 
-For the gRPC bridge to work, Temporal needs to know about the activity types. There are two approaches:
+Conductor workers poll by **task type** (e.g., `send_email`, `process_payment`).
+Temporal workers poll by **task queue name**, and the activity type is returned in the response.
 
-### Approach A: Dynamic Activity (Recommended)
+**Key insight:** `PollActivityTaskQueue` does NOT require knowing activity types in advance - it only needs the task queue name. This simplifies the bridge significantly.
 
-Register a single dynamic activity that handles all Conductor task types:
+### Mapping Strategy: Task Type = Task Queue Name
+
+The simplest mapping is 1:1: each Conductor task type becomes a Temporal task queue:
+
+```
+Conductor: GET /tasks/poll/send_email
+    ↓
+Temporal: PollActivityTaskQueue(taskQueue="send_email")
+```
 
 ```java
-@ActivityInterface
-public interface ConductorTaskActivity {
-    @ActivityMethod
-    Map<String, Object> executeTask(String taskType, Map<String, Object> input);
+@GetMapping("/poll/{taskType}")
+public ResponseEntity<Task> pollTask(@PathVariable String taskType, ...) {
+
+    PollActivityTaskQueueRequest request = PollActivityTaskQueueRequest.newBuilder()
+        .setNamespace(namespace)
+        .setTaskQueue(TaskQueue.newBuilder()
+            .setName(taskType)  // Task type IS the task queue name
+            .build())
+        .setIdentity(workerId)
+        .build();
+
+    // ...
 }
 ```
 
-The workflow schedules this activity with the task type as a parameter:
+### Workflow Side: Schedule Activities to Task Type Queue
+
+When the workflow schedules a SIMPLE task, it uses the task type as the task queue:
+
 ```java
-// In workflow
+// In ConductorWorkflowImpl
 for (Task task : tasksToSchedule) {
-    if (isSimpleTask(task)) {
-        ActivityStub stub = Workflow.newUntypedActivityStub(activityOptions);
-        stub.executeAsync("executeTask", task.getTaskType(), task.getInputData());
+    if (task.getTaskType().equals("SIMPLE")) {
+        String taskName = task.getTaskDefName();  // e.g., "send_email"
+
+        ActivityOptions options = ActivityOptions.newBuilder()
+            .setTaskQueue(taskName)  // Route to task-specific queue
+            .setStartToCloseTimeout(Duration.ofSeconds(task.getResponseTimeoutSeconds()))
+            .build();
+
+        ActivityStub stub = Workflow.newUntypedActivityStub(options);
+        stub.executeAsync("execute", task.getInputData());
     }
 }
 ```
 
-The HTTP bridge polls for `executeTask` activities and extracts task type from input.
+### No Pre-Registration Needed
 
-### Approach B: Activity Per Task Type
+The bridge does NOT require:
+- ❌ Activity interfaces defined in advance
+- ❌ Activity implementations registered with worker
+- ❌ Knowledge of task types at deployment time
 
-Register a separate activity for each Conductor task type:
-
-```java
-// Dynamically generated or manually defined
-@ActivityInterface
-public interface SendEmailActivity {
-    @ActivityMethod
-    Map<String, Object> send_email(Map<String, Object> input);
-}
-
-@ActivityInterface
-public interface ProcessPaymentActivity {
-    @ActivityMethod
-    Map<String, Object> process_payment(Map<String, Object> input);
-}
-```
-
-**Trade-off:** More type safety but requires knowing all task types at deployment time.
+It only requires:
+- ✅ Conductor worker polling the HTTP endpoint
+- ✅ Workflow scheduling activities to the correct task queue
 
 ## Comparison Matrix
 
