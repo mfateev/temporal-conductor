@@ -1,14 +1,12 @@
-# Feasibility Analysis: HTTP Polling Bridge for Conductor Workers
+# HTTP Polling Bridge for Conductor Workers
 
 ## Overview
 
-This document analyzes the feasibility of supporting existing Conductor workers that use HTTP polling through Temporal's activity gRPC interface, without requiring any changes to the workers themselves.
+This document describes how to support existing Conductor workers that use HTTP polling through Temporal's activity gRPC interface, without requiring any changes to the workers themselves.
 
-## Current Protocols
+## Protocol Comparison
 
-### Conductor HTTP Polling Protocol
-
-Conductor workers use a pull-based HTTP polling model:
+### Conductor HTTP Polling
 
 ```
 ┌─────────────────┐         ┌─────────────────┐
@@ -22,32 +20,7 @@ Conductor workers use a pull-based HTTP polling model:
 4. Worker reports:   POST /tasks  (TaskResult JSON)
 ```
 
-**Key Conductor Task Polling Response Fields:**
-```json
-{
-  "taskId": "abc-123",
-  "taskType": "send_email",
-  "workflowInstanceId": "workflow-456",
-  "inputData": { "email": "user@example.com" },
-  "status": "IN_PROGRESS",
-  "callbackAfterSeconds": 0,
-  "responseTimeoutSeconds": 60
-}
-```
-
-**Key Conductor TaskResult Fields:**
-```json
-{
-  "taskId": "abc-123",
-  "workflowInstanceId": "workflow-456",
-  "status": "COMPLETED",
-  "outputData": { "sent": true }
-}
-```
-
-### Temporal Activity Protocol
-
-Temporal uses a pull-based gRPC model with long-polling:
+### Temporal Activity Polling
 
 ```
 ┌─────────────────┐  gRPC   ┌─────────────────┐
@@ -61,13 +34,11 @@ Temporal uses a pull-based gRPC model with long-polling:
 4. Worker reports:   RespondActivityTaskCompleted/Failed
 ```
 
-**Key insight:** Both protocols are fundamentally poll-based. The main difference is transport (HTTP vs gRPC) and message format.
+**Key insight:** Both protocols are poll-based. The main difference is transport (HTTP vs gRPC) and message format.
 
-## Bridge Architecture Options
+## Architecture
 
-### Option 1: Direct gRPC-to-HTTP Bridge (Recommended)
-
-This approach wraps Temporal's native `PollActivityTaskQueue` gRPC call with an HTTP endpoint, providing a direct protocol translation without intermediate storage.
+The bridge wraps Temporal's `PollActivityTaskQueue` gRPC with HTTP endpoints, providing direct protocol translation.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -91,14 +62,14 @@ This approach wraps Temporal's native `PollActivityTaskQueue` gRPC call with an 
 │                              ▼                                   │
 │  ┌──────────────────────────────────────────────────────────┐   │
 │  │                    Temporal Server                        │   │
-│  │  - Manages activity task queue                            │   │
+│  │  - Manages activity task queues                           │   │
 │  │  - Handles retries, timeouts, heartbeats                  │   │
 │  │  - Provides at-most-once delivery                         │   │
 │  └──────────────────────────────────────────────────────────┘   │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
                               │
-                              │ HTTP (existing protocol)
+                              │ HTTP (existing Conductor protocol)
                               ▼
                ┌──────────────────────────┐
                │  Existing Conductor      │
@@ -110,7 +81,57 @@ This approach wraps Temporal's native `PollActivityTaskQueue` gRPC call with an 
                └──────────────────────────┘
 ```
 
-#### Implementation
+## Task Type to Task Queue Mapping
+
+### Current Approach: 1:1 Mapping
+
+Each Conductor task type maps directly to a Temporal task queue with the same name:
+
+```
+Conductor: GET /tasks/poll/send_email
+    ↓
+Temporal: PollActivityTaskQueue(taskQueue="send_email")
+```
+
+**Conductor workers poll in parallel per task type:**
+```java
+// From TaskRunnerConfigurer.java - one thread per task type
+this.scheduledExecutorService = Executors.newScheduledThreadPool(workers.size());
+workers.forEach(worker -> scheduledExecutorService.submit(() -> this.startWorker(worker)));
+```
+
+100 task types = 100 parallel HTTP polls = 100 parallel gRPC polls
+
+**This works well because:**
+1. Temporal is designed for many task queues - `PollActivityTaskQueue` is lightweight
+2. No contention between different task types
+3. Bridge is stateless - direct HTTP → gRPC translation
+4. No filtering needed - each queue has exactly one task type
+
+### Workflow Scheduling
+
+When the workflow schedules a SIMPLE task, it uses the task type as the task queue:
+
+```java
+// In ConductorWorkflowImpl
+for (Task task : tasksToSchedule) {
+    if (task.getTaskType().equals("SIMPLE")) {
+        String taskName = task.getTaskDefName();  // e.g., "send_email"
+
+        ActivityOptions options = ActivityOptions.newBuilder()
+            .setTaskQueue(taskName)  // Route to task-specific queue
+            .setStartToCloseTimeout(Duration.ofSeconds(task.getResponseTimeoutSeconds()))
+            .build();
+
+        ActivityStub stub = Workflow.newUntypedActivityStub(options);
+        stub.executeAsync(taskName, task.getInputData());
+    }
+}
+```
+
+## Implementation
+
+### HTTP Polling Endpoint
 
 ```java
 @RestController
@@ -119,11 +140,10 @@ public class ActivityPollingBridge {
 
     private final WorkflowServiceStubs serviceStubs;
     private final String namespace;
-    private final ObjectMapper objectMapper;
 
     /**
      * Poll for activity tasks - wraps Temporal's PollActivityTaskQueue.
-     * This is a long-poll endpoint that blocks up to the specified timeout.
+     * Long-poll endpoint that blocks up to the specified timeout.
      */
     @GetMapping("/poll/{taskType}")
     public ResponseEntity<Task> pollTask(
@@ -131,28 +151,23 @@ public class ActivityPollingBridge {
             @RequestParam(required = false) String workerid,
             @RequestParam(defaultValue = "30000") long timeout) {
 
-        // Build Temporal poll request
-        // taskType directly maps to Temporal task queue name (1:1)
         PollActivityTaskQueueRequest request = PollActivityTaskQueueRequest.newBuilder()
             .setNamespace(namespace)
             .setTaskQueue(TaskQueue.newBuilder()
-                .setName(taskType)  // Task type IS the task queue name
+                .setName(taskType)  // Task type = task queue name
                 .build())
             .setIdentity(workerid != null ? workerid : "conductor-worker")
             .build();
 
-        // Long-poll Temporal (blocks up to server's long-poll timeout, typically 60s)
         PollActivityTaskQueueResponse response = serviceStubs
             .blockingStub()
             .withDeadlineAfter(timeout, TimeUnit.MILLISECONDS)
             .pollActivityTaskQueue(request);
 
-        // Empty response = no task available
         if (response.getTaskToken().isEmpty()) {
             return ResponseEntity.noContent().build();
         }
 
-        // Convert to Conductor Task format
         Task conductorTask = convertToTask(response, taskType);
         return ResponseEntity.ok(conductorTask);
     }
@@ -162,19 +177,14 @@ public class ActivityPollingBridge {
      */
     @PostMapping
     public ResponseEntity<Void> updateTask(@RequestBody TaskResult taskResult) {
-        // taskId contains the base64-encoded Temporal taskToken
         byte[] taskToken = Base64.getDecoder().decode(taskResult.getTaskId());
 
         if (taskResult.getStatus() == TaskStatus.COMPLETED) {
-            // Convert output to Temporal Payloads
-            Payloads result = convertToPayloads(taskResult.getOutputData());
-
             RespondActivityTaskCompletedRequest request = RespondActivityTaskCompletedRequest.newBuilder()
                 .setTaskToken(ByteString.copyFrom(taskToken))
-                .setResult(result)
+                .setResult(convertToPayloads(taskResult.getOutputData()))
                 .setIdentity(taskResult.getWorkerId())
                 .build();
-
             serviceStubs.blockingStub().respondActivityTaskCompleted(request);
         } else if (taskResult.getStatus() == TaskStatus.FAILED) {
             RespondActivityTaskFailedRequest request = RespondActivityTaskFailedRequest.newBuilder()
@@ -184,7 +194,6 @@ public class ActivityPollingBridge {
                     .build())
                 .setIdentity(taskResult.getWorkerId())
                 .build();
-
             serviceStubs.blockingStub().respondActivityTaskFailed(request);
         }
 
@@ -193,7 +202,6 @@ public class ActivityPollingBridge {
 
     /**
      * Heartbeat activity - wraps Temporal's RecordActivityTaskHeartbeat.
-     * Conductor uses callbackAfterSeconds, we map to Temporal heartbeats.
      */
     @PostMapping("/{taskId}/ack")
     public ResponseEntity<Void> ackTask(
@@ -211,7 +219,6 @@ public class ActivityPollingBridge {
             serviceStubs.blockingStub().recordActivityTaskHeartbeat(request);
 
         if (response.getCancelRequested()) {
-            // Activity was cancelled - worker should stop
             return ResponseEntity.status(HttpStatus.GONE).build();
         }
 
@@ -220,190 +227,30 @@ public class ActivityPollingBridge {
 
     private Task convertToTask(PollActivityTaskQueueResponse response, String taskType) {
         Task task = new Task();
-
-        // Use base64-encoded taskToken as taskId
-        // Worker will pass this back when completing
         task.setTaskId(Base64.getEncoder().encodeToString(
             response.getTaskToken().toByteArray()));
-
         task.setTaskType(taskType);
         task.setWorkflowInstanceId(response.getWorkflowExecution().getWorkflowId());
         task.setStatus(TaskStatus.IN_PROGRESS);
-
-        // Convert Temporal Payloads to Conductor inputData
         task.setInputData(convertFromPayloads(response.getInput()));
-
-        // Map timeouts
-        task.setResponseTimeoutSeconds(
-            (int) response.getStartToCloseTimeout().getSeconds());
-        task.setCallbackAfterSeconds(
-            (int) response.getHeartbeatTimeout().getSeconds());
-
+        task.setResponseTimeoutSeconds((int) response.getStartToCloseTimeout().getSeconds());
+        task.setCallbackAfterSeconds((int) response.getHeartbeatTimeout().getSeconds());
         return task;
     }
 }
 ```
 
-#### Advantages
+## Advantages
 
 1. **No intermediate storage** - Temporal server handles all queuing
-2. **Native retry/timeout handling** - Temporal manages all failure scenarios
-3. **At-most-once delivery** - Temporal's semantics are preserved
+2. **Native retry/timeout handling** - Temporal manages failure scenarios
+3. **At-most-once delivery** - Temporal's semantics preserved
 4. **Heartbeat support** - Direct mapping to `RecordActivityTaskHeartbeat`
 5. **Low latency** - Long-poll provides near-instant task delivery
 6. **Stateless bridge** - No state to manage or sync
+7. **Workers unchanged** - Existing Conductor workers work as-is
 
-#### Challenges
-
-| Challenge | Solution | Complexity |
-|-----------|----------|------------|
-| Task type → Task queue mapping | 1:1 mapping: task type = task queue name | Low |
-| Payload format conversion | JSON ↔ Temporal Payloads | Low |
-| Workflow scheduling | Schedule activities to task-type-named queues | Low |
-
-### Option 2: Async Activity Completion Bridge (Alternative)
-
-This approach uses Temporal's async activity completion feature with intermediate storage.
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                     Temporal Conductor Server                    │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌──────────────┐    ┌──────────────────┐    ┌───────────────┐ │
-│  │  Temporal    │───►│ Bridge Activity  │───►│ Pending Task  │ │
-│  │  Workflow    │    │ (doNotComplete)  │    │ Store         │ │
-│  └──────────────┘    └──────────────────┘    └───────┬───────┘ │
-│                                                       │         │
-│  ┌──────────────┐    ┌──────────────────┐           │         │
-│  │  Activity    │◄───│ Task Completion  │◄──────────┤         │
-│  │  Completion  │    │ Handler          │           │         │
-│  │  Client      │    └──────────────────┘           │         │
-│  └──────────────┘                                    │         │
-│                                                       │         │
-│  ┌────────────────────────────────────────────────────┴──────┐ │
-│  │              HTTP Polling Endpoints                        │ │
-│  │  GET  /tasks/poll/{taskType}  - Returns pending task       │ │
-│  │  POST /tasks                  - Completes task             │ │
-│  └────────────────────────────────────────────────────────────┘ │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-This approach has higher complexity due to the need for:
-- Intermediate task storage
-- Task cleanup/expiration logic
-- Coordination between workflow activities and HTTP endpoints
-
-**Use this approach if:** You need to support workflows that don't know about Conductor task types at definition time.
-
-## Key Integration Point: Task Type to Task Queue Mapping
-
-Conductor workers poll by **task type** (e.g., `send_email`, `process_payment`).
-Temporal workers poll by **task queue name**, and the activity type is returned in the response.
-
-**Key insight:** `PollActivityTaskQueue` does NOT require knowing activity types in advance - it only needs the task queue name. This simplifies the bridge significantly.
-
-### Conductor Polling Model
-
-Conductor workers poll **in parallel per task type**. Looking at `TaskRunnerConfigurer.java`:
-
-```java
-// One thread per worker (task type)
-this.scheduledExecutorService = Executors.newScheduledThreadPool(workers.size());
-workers.forEach(worker -> scheduledExecutorService.submit(() -> this.startWorker(worker)));
-```
-
-**100 task types = 100 parallel poll threads = 100 parallel HTTP requests**
-
-### Mapping Strategy: Task Type = Task Queue Name
-
-The simplest mapping is 1:1: each Conductor task type becomes a Temporal task queue:
-
-```
-Conductor: GET /tasks/poll/send_email
-    ↓
-Temporal: PollActivityTaskQueue(taskQueue="send_email")
-```
-
-This works well because:
-1. **Temporal is designed for parallel polling** - `PollActivityTaskQueue` is lightweight long-poll
-2. **No contention** - each task type has its own task queue
-3. **Bridge is stateless** - just translates HTTP → gRPC 1:1
-
-```java
-@GetMapping("/poll/{taskType}")
-public ResponseEntity<Task> pollTask(@PathVariable String taskType, ...) {
-
-    PollActivityTaskQueueRequest request = PollActivityTaskQueueRequest.newBuilder()
-        .setNamespace(namespace)
-        .setTaskQueue(TaskQueue.newBuilder()
-            .setName(taskType)  // Task type IS the task queue name
-            .build())
-        .setIdentity(workerId)
-        .build();
-
-    // ...
-}
-```
-
-### Workflow Side: Schedule Activities to Task Type Queue
-
-When the workflow schedules a SIMPLE task, it uses the task type as the task queue:
-
-```java
-// In ConductorWorkflowImpl
-for (Task task : tasksToSchedule) {
-    if (task.getTaskType().equals("SIMPLE")) {
-        String taskName = task.getTaskDefName();  // e.g., "send_email"
-
-        ActivityOptions options = ActivityOptions.newBuilder()
-            .setTaskQueue(taskName)  // Route to task-specific queue
-            .setStartToCloseTimeout(Duration.ofSeconds(task.getResponseTimeoutSeconds()))
-            .build();
-
-        ActivityStub stub = Workflow.newUntypedActivityStub(options);
-        stub.executeAsync("execute", task.getInputData());
-    }
-}
-```
-
-### No Pre-Registration Needed
-
-The bridge does NOT require:
-- ❌ Activity interfaces defined in advance
-- ❌ Activity implementations registered with worker
-- ❌ Knowledge of task types at deployment time
-
-It only requires:
-- ✅ Conductor worker polling the HTTP endpoint
-- ✅ Workflow scheduling activities to the correct task queue
-
-## Comparison Matrix
-
-| Aspect | Option 1: gRPC Bridge | Option 2: Async Completion | Native SDK (Plan 14) |
-|--------|----------------------|---------------------------|---------------------|
-| Worker Changes | None | None | None (same annotations) |
-| Latency | ~0ms (long-poll) | polling interval | ~0ms (push) |
-| Complexity | Low-Medium | High | Low |
-| Intermediate Storage | None | Required | None |
-| Heartbeating | Direct gRPC | Must proxy | Automatic |
-| Temporal Retries | Automatic | Must handle | Automatic |
-| Scalability | High (Temporal handles) | Medium (central store) | High |
-| Debugging | Straightforward | Complex (async) | Easy |
-
-## Feasibility Assessment
-
-### Option 1 (gRPC Bridge): Highly Feasible
-
-**Technical Requirements:**
-- ✅ `PollActivityTaskQueue` gRPC is a public Temporal API
-- ✅ Long-polling maps naturally to HTTP long-polling
-- ✅ Task tokens can be passed as opaque identifiers
-- ✅ `RespondActivityTaskCompleted` provides completion
-- ✅ `RecordActivityTaskHeartbeat` provides heartbeat support
-
-**Implementation Effort:**
+## Implementation Effort
 
 | Component | Effort | Risk |
 |-----------|--------|------|
@@ -411,66 +258,83 @@ It only requires:
 | HTTP Completion Endpoint | 1 day | Low |
 | Heartbeat Endpoint | 0.5 days | Low |
 | Payload Conversion | 1-2 days | Low |
-| Activity Registration Strategy | 1-2 days | Medium |
 | Testing | 2-3 days | Low |
-| **Total** | **7-10 days** | **Low-Medium** |
+| **Total** | **6-9 days** | **Low** |
 
-### Option 2 (Async Completion): Feasible but Complex
+---
 
-Same 10-15 days as in original analysis, with higher risk.
+## Future Enhancement: Worker Groups
 
-## Recommendation
+The current 1:1 mapping creates one Temporal task queue per task type. For deployments with many task types (100+), this can be optimized by grouping task types that share workers.
 
-### For Temporal Conductor:
+### Concept
 
-**Implement Option 1 (gRPC Bridge)** if HTTP worker support is needed.
-
-Reasons:
-1. **Simpler architecture** - No intermediate storage
-2. **Temporal-native** - Uses Temporal's own polling mechanism
-3. **Lower risk** - Temporal handles all the hard parts (queuing, retries, timeouts)
-4. **Lower maintenance** - Stateless bridge is easier to operate
-
-### Implementation Priority:
-
-1. **First**: Native SDK (Plan 14) - For new/redeployable Java workers
-2. **Second**: gRPC Bridge (Option 1) - For legacy HTTP workers that cannot be touched
-3. **Skip**: Async Completion (Option 2) - Too complex for the value
-
-### Architecture Decision
+Workers that handle multiple task types can share a single Temporal task queue:
 
 ```
-                    ┌─────────────────────────────────┐
-                    │     Conductor Task Types         │
-                    └─────────────────────────────────┘
-                                    │
-                    ┌───────────────┴───────────────┐
-                    │                               │
-                    ▼                               ▼
-        ┌───────────────────┐           ┌───────────────────┐
-        │   Java Workers    │           │  HTTP Workers     │
-        │  (@WorkerTask)    │           │  (Legacy/Other)   │
-        └───────────────────┘           └───────────────────┘
-                    │                               │
-                    ▼                               ▼
-        ┌───────────────────┐           ┌───────────────────┐
-        │  Native SDK       │           │  gRPC-HTTP Bridge │
-        │  (Plan 14)        │           │  (This Plan)      │
-        └───────────────────┘           └───────────────────┘
-                    │                               │
-                    └───────────────┬───────────────┘
-                                    ▼
-                    ┌─────────────────────────────────┐
-                    │       Temporal Server           │
-                    │  (Activity Task Queues)         │
-                    └─────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│  Task Type Registry                                             │
+│                                                                 │
+│  WorkerGroup "notification-workers" {                           │
+│    taskTypes: [send_email, send_sms, send_push]                 │
+│    taskQueue: "notification-tasks"                              │
+│  }                                                              │
+│                                                                 │
+│  WorkerGroup "payment-workers" {                                │
+│    taskTypes: [process_payment, refund_payment, verify_card]    │
+│    taskQueue: "payment-tasks"                                   │
+│  }                                                              │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-Both approaches complement each other:
-- Native SDK for best performance and developer experience
-- gRPC Bridge for backward compatibility with existing HTTP workers
+### How It Works
 
-## Appendix: Temporal gRPC APIs Used
+**Registration:** Workers register the task types they handle:
+```
+POST /worker-groups
+{
+  "name": "notification-workers",
+  "taskTypes": ["send_email", "send_sms", "send_push"],
+  "taskQueue": "notification-tasks"
+}
+```
+
+**Workflow scheduling:** Uses registry to route to correct queue:
+```java
+String taskQueue = taskTypeRegistry.getTaskQueue(task.getTaskDefName());
+ActivityOptions options = ActivityOptions.newBuilder()
+    .setTaskQueue(taskQueue)
+    .build();
+```
+
+**Polling:** Bridge maps task type to group's queue:
+```
+GET /tasks/poll/send_email
+  → Lookup: send_email → notification-tasks
+  → PollActivityTaskQueue(taskQueue="notification-tasks")
+  → Returns any task from that queue
+```
+
+### Constraint
+
+**Workers sharing a queue must handle ALL task types in that queue.**
+
+If a worker polls for `send_email` but gets a `send_sms` task (same queue), it must be able to handle it. This is enforced by the registration - you can only add a task type to a group if all workers in that group support it.
+
+### Benefits
+
+- Reduces Temporal task queues from N (task types) to M (worker groups)
+- More efficient resource utilization
+- Aligns with how workers are typically deployed (one service handles related tasks)
+
+### When to Use
+
+- **Use 1:1 mapping (current)** for < 50 task types or when task types have independent workers
+- **Use worker groups (future)** for 100+ task types where workers naturally group by domain
+
+---
+
+## Temporal gRPC APIs Used
 
 ### PollActivityTaskQueue
 
@@ -482,20 +346,16 @@ message PollActivityTaskQueueRequest {
     string namespace = 1;
     TaskQueue task_queue = 2;
     string identity = 3;
-    WorkerVersionCapabilities worker_version_capabilities = 4;
 }
 
 message PollActivityTaskQueueResponse {
     bytes task_token = 1;
-    string activity_id = 3;
     ActivityType activity_type = 4;
     Payloads input = 5;
     WorkflowExecution workflow_execution = 7;
-    google.protobuf.Duration schedule_to_close_timeout = 9;
     google.protobuf.Duration start_to_close_timeout = 10;
     google.protobuf.Duration heartbeat_timeout = 11;
     int32 attempt = 12;
-    // ... more fields
 }
 ```
 
