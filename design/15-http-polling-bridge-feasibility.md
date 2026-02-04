@@ -304,6 +304,18 @@ Temporal workers poll by **task queue name**, and the activity type is returned 
 
 **Key insight:** `PollActivityTaskQueue` does NOT require knowing activity types in advance - it only needs the task queue name. This simplifies the bridge significantly.
 
+### Conductor Polling Model
+
+Conductor workers poll **in parallel per task type**. Looking at `TaskRunnerConfigurer.java`:
+
+```java
+// One thread per worker (task type)
+this.scheduledExecutorService = Executors.newScheduledThreadPool(workers.size());
+workers.forEach(worker -> scheduledExecutorService.submit(() -> this.startWorker(worker)));
+```
+
+**100 task types = 100 parallel poll threads = 100 parallel HTTP requests**
+
 ### Mapping Strategy: Task Type = Task Queue Name
 
 The simplest mapping is 1:1: each Conductor task type becomes a Temporal task queue:
@@ -313,6 +325,11 @@ Conductor: GET /tasks/poll/send_email
     ↓
 Temporal: PollActivityTaskQueue(taskQueue="send_email")
 ```
+
+This works well because:
+1. **Temporal is designed for parallel polling** - `PollActivityTaskQueue` is lightweight long-poll
+2. **No contention** - each task type has its own task queue
+3. **Bridge is stateless** - just translates HTTP → gRPC 1:1
 
 ```java
 @GetMapping("/poll/{taskType}")
