@@ -182,10 +182,12 @@ class ContinueAsNewE2ETest extends AbstractE2ETest {
         // Wait for completion - fail fast
         WorkflowStatusResponse status = waitForWorkflowCompletion(workflowId, Duration.ofSeconds(90));
 
-        // Log Conductor server logs before assertion for debugging
-        log.info("=== Conductor Server Logs ===");
-        logConductorServerLogs();
-        log.info("=== End Conductor Server Logs ===");
+        // Only log on failure to avoid timeout overhead
+        if (!"COMPLETED".equals(status.getStatus())) {
+            log.info("=== Conductor Server Logs ===");
+            logConductorServerLogs();
+            log.info("=== End Conductor Server Logs ===");
+        }
 
         assertEquals("COMPLETED", status.getStatus(), "Workflow with " + iterations + " iterations should complete");
 

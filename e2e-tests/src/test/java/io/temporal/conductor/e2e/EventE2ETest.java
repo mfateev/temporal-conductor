@@ -37,7 +37,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * E2E tests for EVENT task type against real Temporal server.
- * EVENT tasks publish events to queues (using logging providers by default).
+ * EVENT tasks publish events to in-memory queues that store messages for verification.
  */
 class EventE2ETest extends AbstractE2ETest {
 

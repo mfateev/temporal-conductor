@@ -20,7 +20,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.netflix.conductor.core.events.EventQueueProvider;
 import com.netflix.conductor.core.events.EventQueues;
 import com.netflix.conductor.core.utils.ParametersUtils;
-import io.temporal.conductor.executor.LoggingEventQueueProvider;
+import io.temporal.conductor.executor.InMemoryEventQueueProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -39,11 +39,12 @@ import static java.util.function.Function.identity;
  * Configuration for Conductor's EventQueues infrastructure.
  *
  * <p>This configuration follows Conductor's pattern of auto-discovering EventQueueProvider beans.
- * By default, provides logging-only queue providers for common queue types.
+ * By default, provides in-memory queue providers for common queue types (conductor, sqs, kafka,
+ * amqp, nats). These in-memory queues store published messages and allow test verification.
  *
- * <p>To use real queue providers (Kafka, SQS, etc.), add the appropriate Conductor
+ * <p>To use real queue providers (Kafka, SQS, etc.) in production, add the appropriate Conductor
  * dependencies and define EventQueueProvider beans. They will be automatically discovered
- * and registered.
+ * and registered, overriding the default in-memory providers.
  *
  * <p>Example for Kafka:
  * <pre>
@@ -58,37 +59,37 @@ public class EventQueueConfig {
 
     private static final Logger logger = LoggerFactory.getLogger(EventQueueConfig.class);
 
-    // Default logging-only providers for common queue types.
+    // Default in-memory providers for common queue types (store messages for test verification).
     // Users can override by defining their own EventQueueProvider beans.
 
     @Bean
     @ConditionalOnMissingBean(name = "conductorEventQueueProvider")
     public EventQueueProvider conductorEventQueueProvider() {
-        return new LoggingEventQueueProvider("conductor");
+        return new InMemoryEventQueueProvider("conductor");
     }
 
     @Bean
     @ConditionalOnMissingBean(name = "sqsEventQueueProvider")
     public EventQueueProvider sqsEventQueueProvider() {
-        return new LoggingEventQueueProvider("sqs");
+        return new InMemoryEventQueueProvider("sqs");
     }
 
     @Bean
     @ConditionalOnMissingBean(name = "kafkaEventQueueProvider")
     public EventQueueProvider kafkaEventQueueProvider() {
-        return new LoggingEventQueueProvider("kafka");
+        return new InMemoryEventQueueProvider("kafka");
     }
 
     @Bean
     @ConditionalOnMissingBean(name = "amqpEventQueueProvider")
     public EventQueueProvider amqpEventQueueProvider() {
-        return new LoggingEventQueueProvider("amqp");
+        return new InMemoryEventQueueProvider("amqp");
     }
 
     @Bean
     @ConditionalOnMissingBean(name = "natsEventQueueProvider")
     public EventQueueProvider natsEventQueueProvider() {
-        return new LoggingEventQueueProvider("nats");
+        return new InMemoryEventQueueProvider("nats");
     }
 
     /**
