@@ -32,6 +32,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -127,17 +128,20 @@ class MetadataCrudE2ETest extends AbstractE2ETest {
         registerWorkflowDef(createSimpleWorkflowDef(workflowName1, taskName));
         registerWorkflowDef(createSimpleWorkflowDef(workflowName2, taskName));
 
-        // Get all workflow definitions
-        List<WorkflowDef> allDefs = getAllWorkflowDefs();
-        assertNotNull(allDefs);
-        assertFalse(allDefs.isEmpty());
+        // Wait for both workflows to be visible in the list (eventual consistency)
+        await().atMost(Duration.ofSeconds(10))
+                .pollInterval(Duration.ofMillis(500))
+                .untilAsserted(() -> {
+                    List<WorkflowDef> allDefs = getAllWorkflowDefs();
+                    assertNotNull(allDefs);
+                    assertFalse(allDefs.isEmpty());
 
-        // Verify our workflows are in the list
-        boolean foundWf1 = allDefs.stream().anyMatch(d -> workflowName1.equals(d.getName()));
-        boolean foundWf2 = allDefs.stream().anyMatch(d -> workflowName2.equals(d.getName()));
-        assertTrue(foundWf1, "Should find first workflow in list");
-        assertTrue(foundWf2, "Should find second workflow in list");
-        log.info("Found {} workflow definitions in total", allDefs.size());
+                    boolean foundWf1 = allDefs.stream().anyMatch(d -> workflowName1.equals(d.getName()));
+                    boolean foundWf2 = allDefs.stream().anyMatch(d -> workflowName2.equals(d.getName()));
+                    assertTrue(foundWf1, "Should find first workflow in list");
+                    assertTrue(foundWf2, "Should find second workflow in list");
+                    log.info("Found {} workflow definitions in total", allDefs.size());
+                });
     }
 
     @Test

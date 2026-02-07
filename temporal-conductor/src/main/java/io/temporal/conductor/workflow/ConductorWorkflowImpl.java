@@ -100,7 +100,8 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     // Event-driven state tracking - Promise.handle callbacks set this flag
-    private volatile boolean stateUpdated = false;
+    // Note: volatile is unnecessary as Temporal workflows are single-threaded and deterministic
+    private boolean stateUpdated = false;
     private final Set<String> pendingActivityTaskIds = new HashSet<>();
     private final Set<String> pendingTimerTaskRefs = new HashSet<>();
     private final Set<String> pendingChildWorkflowTaskIds = new HashSet<>();
@@ -111,7 +112,7 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
     private SystemTaskExecutor systemTaskExecutor;
 
     private final Map<String, Map<String, Object>> pendingSignals = new HashMap<>();
-    private volatile boolean isPaused = false;
+    private boolean isPaused = false;
     private long lastUpdateTime = 0;
 
     private ConductorWorkflowInput workflowInput;
