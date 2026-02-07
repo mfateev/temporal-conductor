@@ -44,6 +44,8 @@ import io.temporal.conductor.handler.TaskTypeHandler;
 import io.temporal.conductor.handler.TaskTypeHandlerFactory;
 import io.temporal.conductor.handler.TaskTypeHandlerRegistry;
 import io.temporal.conductor.handler.impl.TaskExecutionContextImpl;
+import io.temporal.conductor.util.TaskNameParser;
+import io.temporal.conductor.util.TaskNameParser.ParsedTaskName;
 import io.temporal.common.converter.EncodedValues;
 import io.temporal.conductor.workflow.model.ConductorWorkflowInput;
 import io.temporal.conductor.workflow.model.ConductorWorkflowOutput;
@@ -1266,7 +1268,7 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
      *   <li>responseTimeoutSeconds → heartbeatTimeout (worker liveness)</li>
      * </ul>
      */
-    private ActivityOptions buildActivityOptions(TaskModel task) {
+    private ActivityOptions buildActivityOptions(TaskModel task, String taskQueue) {
         TaskDef taskDef = metadataDao.getTaskDef(task.getTaskDefName());
 
         // Build retry options from TaskDef
@@ -1325,6 +1327,11 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
                     Duration.ofSeconds(taskDef.getResponseTimeoutSeconds()));
         }
 
+        // Set custom task queue if specified (for external worker routing)
+        if (taskQueue != null && !taskQueue.isEmpty()) {
+            optionsBuilder.setTaskQueue(taskQueue);
+        }
+
         return optionsBuilder.build();
     }
 
@@ -1339,10 +1346,19 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
         task.setStatus(TaskModel.Status.IN_PROGRESS);
         task.setStartTime(Workflow.currentTimeMillis());
 
-        ActivityOptions options = buildActivityOptions(task);
+        // Parse task name for optional task queue suffix (e.g., "process_order@external-workers")
+        String taskDefName = task.getTaskDefName();
+        ParsedTaskName parsed = TaskNameParser.parse(taskDefName);
+        String activityType = parsed.baseName();
+        String taskQueue = parsed.taskQueue();
+
+        if (taskQueue != null) {
+            logger.debug("Routing task {} to external task queue: {}", task.getReferenceTaskName(), taskQueue);
+        }
+
+        ActivityOptions options = buildActivityOptions(task, taskQueue);
         ActivityStub activityStub = Workflow.newUntypedActivityStub(options);
 
-        String activityType = task.getTaskDefName();
         String taskId = task.getTaskId();
 
         // Pass: taskRefName, conductorTaskType, inputData
@@ -1406,10 +1422,18 @@ public class ConductorWorkflowImpl implements DynamicWorkflow {
         task.setStartTime(Workflow.currentTimeMillis());
 
         try {
-            ActivityOptions options = buildActivityOptions(task);
-            ActivityStub activityStub = Workflow.newUntypedActivityStub(options);
+            // Parse task name for optional task queue suffix (e.g., "process_order@external-workers")
+            String taskDefName = task.getTaskDefName();
+            ParsedTaskName parsed = TaskNameParser.parse(taskDefName);
+            String activityType = parsed.baseName();
+            String taskQueue = parsed.taskQueue();
 
-            String activityType = task.getTaskDefName();
+            if (taskQueue != null) {
+                logger.debug("Routing task {} to external task queue: {}", task.getReferenceTaskName(), taskQueue);
+            }
+
+            ActivityOptions options = buildActivityOptions(task, taskQueue);
+            ActivityStub activityStub = Workflow.newUntypedActivityStub(options);
             // Pass: taskRefName, conductorTaskType, inputData
             TaskExecutionResult result = activityStub.execute(
                     activityType,

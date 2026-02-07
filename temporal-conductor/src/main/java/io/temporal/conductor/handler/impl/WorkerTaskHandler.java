@@ -22,6 +22,8 @@ import com.netflix.conductor.model.WorkflowModel;
 import io.temporal.conductor.handler.ExecutionMode;
 import io.temporal.conductor.handler.TaskExecutionContext;
 import io.temporal.conductor.handler.TaskTypeHandler;
+import io.temporal.conductor.util.TaskNameParser;
+import io.temporal.conductor.util.TaskNameParser.ParsedTaskName;
 import io.temporal.conductor.workflow.model.TaskExecutionResult;
 import java.util.Collections;
 import java.util.Set;
@@ -102,17 +104,27 @@ public class WorkerTaskHandler implements TaskTypeHandler {
             return;
         }
 
-        // Activity type is the task definition name
-        String activityType = task.getTaskDefName();
+        // Parse task name for optional task queue suffix (e.g., "process_order@external-workers")
+        String taskDefName = task.getTaskDefName();
+        ParsedTaskName parsed = TaskNameParser.parse(taskDefName);
+
+        // Activity type is the base name (without @taskQueue suffix)
+        String activityType = parsed.baseName();
+        String taskQueue = parsed.taskQueue();
+
+        if (taskQueue != null) {
+            logger.debug("Routing task {} to external task queue: {}", taskRefName, taskQueue);
+        }
 
         // Execute activity asynchronously
-        // Pass: taskRefName, taskType, inputData
+        // Pass: taskRefName, taskType, inputData, taskQueue
         context.executeActivityAsync(
                 activityType,
                 taskId,
                 taskRefName,
                 task.getTaskType(),
                 task.getInputData() != null ? task.getInputData() : Collections.emptyMap(),
+                taskQueue,
                 (result, failure) -> handleActivityCompletion(task, result, failure, context));
     }
 

@@ -1,0 +1,40 @@
+plugins {
+    id 'java'
+    id 'application'
+}
+
+group = 'io.temporal.conductor'
+version = '1.0-SNAPSHOT'
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // Temporal SDK
+    implementation 'io.temporal:temporal-sdk:1.25.0'
+
+    // Jackson for JSON serialization
+    implementation 'com.fasterxml.jackson.core:jackson-databind:2.15.3'
+
+    // Logging
+    implementation 'org.slf4j:slf4j-api:2.0.9'
+    runtimeOnly 'ch.qos.logback:logback-classic:1.4.14'
+}
+
+application {
+    mainClass = 'io.temporal.conductor.demo.ExternalWorkerDemo'
+}
+
+// Allow passing arguments to the application
+run {
+    standardInput = System.in
+    if (project.hasProperty('args')) {
+        args project.args.split(',')
+    }
+}
