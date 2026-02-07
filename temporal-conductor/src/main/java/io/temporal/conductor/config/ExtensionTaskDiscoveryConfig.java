@@ -69,7 +69,6 @@ public class ExtensionTaskDiscoveryConfig {
             TaskType.TASK_TYPE_FORK,
             TaskType.JOIN.name(),
             TaskType.SWITCH.name(),
-            TaskType.DECISION.name(),
             TaskType.TERMINATE.name(),
             TaskType.SET_VARIABLE.name(),
             TaskType.DO_WHILE.name(),

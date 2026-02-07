@@ -32,7 +32,7 @@ import org.slf4j.LoggerFactory;
  * <p>This handler delegates to Conductor's SystemTaskExecutor for:
  * <ul>
  *   <li>FORK/FORK_JOIN - Parallel branch creation</li>
- *   <li>SWITCH/DECISION - Conditional branching</li>
+ *   <li>SWITCH - Conditional branching</li>
  *   <li>SET_VARIABLE - Variable assignment</li>
  *   <li>TERMINATE - Workflow termination</li>
  *   <li>NOOP - No operation placeholder</li>
@@ -53,7 +53,6 @@ public class SyncSystemTaskHandler implements TaskTypeHandler {
             TaskType.FORK_JOIN.name(),
             TaskType.TASK_TYPE_FORK,  // "FORK" - actual type used in workflows
             TaskType.SWITCH.name(),
-            TaskType.DECISION.name(),
             TaskType.SET_VARIABLE.name(),
             TaskType.TERMINATE.name(),
             "NOOP"

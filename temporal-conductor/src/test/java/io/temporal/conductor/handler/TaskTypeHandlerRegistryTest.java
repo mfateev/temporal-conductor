@@ -53,7 +53,6 @@ class TaskTypeHandlerRegistryTest {
             TaskType.FORK_JOIN.name(),
             "FORK", // TaskType.TASK_TYPE_FORK
             TaskType.SWITCH.name(),
-            TaskType.DECISION.name(),
             TaskType.SET_VARIABLE.name(),
             TaskType.TERMINATE.name(),
             "NOOP",

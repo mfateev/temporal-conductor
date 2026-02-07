@@ -22,7 +22,6 @@ import com.netflix.conductor.core.config.ConductorProperties;
 import com.netflix.conductor.core.execution.DeciderService;
 import com.netflix.conductor.core.execution.evaluators.Evaluator;
 import com.netflix.conductor.core.execution.evaluators.ValueParamEvaluator;
-import com.netflix.conductor.core.execution.mapper.DecisionTaskMapper;
 import com.netflix.conductor.core.execution.mapper.DoWhileTaskMapper;
 import com.netflix.conductor.core.execution.mapper.DynamicTaskMapper;
 import com.netflix.conductor.core.execution.mapper.EventTaskMapper;
@@ -181,14 +180,11 @@ public class TemporalDeciderServiceFactory {
         EventTaskMapper eventMapper = new EventTaskMapper(parametersUtils);
         mappers.put(TaskType.EVENT.name(), eventMapper);
 
-        // SWITCH and DECISION (deprecated) task mappers
+        // SWITCH task mapper
         Map<String, Evaluator> evaluators = new HashMap<>();
         evaluators.put(ValueParamEvaluator.NAME, new ValueParamEvaluator());
         SwitchTaskMapper switchMapper = new SwitchTaskMapper(evaluators);
         mappers.put(TaskType.SWITCH.name(), switchMapper);
-
-        DecisionTaskMapper decisionMapper = new DecisionTaskMapper();
-        mappers.put(TaskType.DECISION.name(), decisionMapper);
 
         return mappers;
     }

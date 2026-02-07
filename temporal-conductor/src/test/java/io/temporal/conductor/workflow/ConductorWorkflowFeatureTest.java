@@ -51,7 +51,7 @@ import org.slf4j.LoggerFactory;
  * Unit tests for Conductor workflow features using TestWorkflowEnvironment.
  *
  * <p>These tests verify workflow execution features without requiring Docker or a real Temporal server.
- * Covers: FORK_JOIN, SUB_WORKFLOW, DYNAMIC, SWITCH/DECISION, DO_WHILE, HUMAN tasks, and sequential execution.
+ * Covers: FORK_JOIN, SUB_WORKFLOW, DYNAMIC, SWITCH, DO_WHILE, HUMAN tasks, and sequential execution.
  */
 @Timeout(120)
 class ConductorWorkflowFeatureTest {
@@ -262,7 +262,7 @@ class ConductorWorkflowFeatureTest {
         assertEquals("finish_task", activityTypes.get(2));
     }
 
-    // ==================== SWITCH/DECISION Tests ====================
+    // ==================== SWITCH Tests ====================
 
     @Test
     void testSwitchCaseA() throws Exception {
