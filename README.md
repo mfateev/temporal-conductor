@@ -49,6 +49,7 @@ docker compose -f docker/docker-compose.yml up -d
 docker compose -f docker/docker-compose.yml logs init-temporal -f
 
 # Services:
+# - Conductor UI:     http://localhost:5001
 # - Conductor API:    http://localhost:8080
 # - Swagger UI:       http://localhost:8080/swagger-ui.html
 # - Temporal UI:      http://localhost:8234

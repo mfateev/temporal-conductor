@@ -33,7 +33,7 @@ class WorkflowResourceTest {
         mockMvc.perform(post("/api/workflow")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\": \"test-workflow\", \"input\": {\"key\": \"value\"}}"))
-                .andExpect(status().isOk())
+                .andExpect(status().isCreated())
                 .andExpect(content().string(notNullValue()));
     }
 
@@ -42,7 +42,7 @@ class WorkflowResourceTest {
         mockMvc.perform(post("/api/workflow/test-workflow")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"key\": \"value\"}"))
-                .andExpect(status().isOk())
+                .andExpect(status().isCreated())
                 .andExpect(content().string(notNullValue()));
     }
 
@@ -151,7 +151,7 @@ class WorkflowResourceTest {
         mockMvc.perform(post("/api/workflow")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\": \"test-workflow\"}"))
-                .andExpect(status().isOk());
+                .andExpect(status().isCreated());
 
         // Then get running workflows by name
         mockMvc.perform(get("/api/workflow/running/test-workflow"))

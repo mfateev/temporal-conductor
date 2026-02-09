@@ -344,7 +344,7 @@ public class TemporalWorkflowService implements WorkflowService {
         WorkflowSummary summary = new WorkflowSummary();
         summary.setWorkflowId(info.getExecution().getWorkflowId());
         summary.setWorkflowType(info.getType().getName());
-        summary.setStatus(mapTemporalStatusToConductor(info.getStatus()));
+        summary.setStatus(mapTemporalStatus(info.getStatus()));
 
         if (info.hasStartTime()) {
             long startMillis = info.getStartTime().getSeconds() * 1000
@@ -358,27 +358,6 @@ public class TemporalWorkflowService implements WorkflowService {
         }
 
         return summary;
-    }
-
-    private static String mapTemporalStatusToConductor(WorkflowExecutionStatus temporalStatus) {
-        switch (temporalStatus) {
-            case WORKFLOW_EXECUTION_STATUS_RUNNING:
-                return "RUNNING";
-            case WORKFLOW_EXECUTION_STATUS_COMPLETED:
-                return "COMPLETED";
-            case WORKFLOW_EXECUTION_STATUS_FAILED:
-                return "FAILED";
-            case WORKFLOW_EXECUTION_STATUS_CANCELED:
-                return "TERMINATED";
-            case WORKFLOW_EXECUTION_STATUS_TERMINATED:
-                return "TERMINATED";
-            case WORKFLOW_EXECUTION_STATUS_CONTINUED_AS_NEW:
-                return "RUNNING";
-            case WORKFLOW_EXECUTION_STATUS_TIMED_OUT:
-                return "TIMED_OUT";
-            default:
-                return "UNKNOWN";
-        }
     }
 
     private Map<String, String> buildTaskDefsJson(WorkflowDef workflowDef,
@@ -911,6 +890,7 @@ public class TemporalWorkflowService implements WorkflowService {
             case WORKFLOW_EXECUTION_STATUS_FAILED -> "FAILED";
             case WORKFLOW_EXECUTION_STATUS_CANCELED -> "TERMINATED";
             case WORKFLOW_EXECUTION_STATUS_TERMINATED -> "TERMINATED";
+            case WORKFLOW_EXECUTION_STATUS_CONTINUED_AS_NEW -> "RUNNING";
             case WORKFLOW_EXECUTION_STATUS_TIMED_OUT -> "TIMED_OUT";
             default -> "UNKNOWN";
         };

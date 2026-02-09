@@ -92,7 +92,9 @@ public class UpdateTaskRequest {
             try {
                 result.setStatus(TaskResult.Status.valueOf(status));
             } catch (IllegalArgumentException e) {
-                result.setStatus(TaskResult.Status.IN_PROGRESS);
+                throw new IllegalArgumentException(
+                        "Invalid task status: '" + status + "'. Valid values are: "
+                                + java.util.Arrays.toString(TaskResult.Status.values()), e);
             }
         }
 

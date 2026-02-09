@@ -22,7 +22,6 @@ import com.netflix.conductor.core.config.ConductorProperties;
 import com.netflix.conductor.core.execution.DeciderService;
 import com.netflix.conductor.core.events.EventQueueProvider;
 import com.netflix.conductor.core.events.EventQueues;
-import com.netflix.conductor.core.execution.tasks.Decision;
 import com.netflix.conductor.core.execution.tasks.DoWhile;
 import com.netflix.conductor.core.execution.tasks.Event;
 import com.netflix.conductor.core.execution.tasks.Fork;
@@ -64,7 +63,6 @@ public class SystemTaskExecutor {
         SYSTEM_TASK_TYPES.add(TaskType.TASK_TYPE_FORK); // "FORK" - actual type used in workflows
         SYSTEM_TASK_TYPES.add(TaskType.JOIN.name());
         SYSTEM_TASK_TYPES.add(TaskType.SWITCH.name());
-        SYSTEM_TASK_TYPES.add(TaskType.DECISION.name());
         SYSTEM_TASK_TYPES.add(TaskType.TERMINATE.name());
         SYSTEM_TASK_TYPES.add(TaskType.SET_VARIABLE.name());
         SYSTEM_TASK_TYPES.add(TaskType.DO_WHILE.name());
@@ -122,7 +120,6 @@ public class SystemTaskExecutor {
         systemTasks.put(TaskType.TASK_TYPE_FORK, fork); // "FORK" - actual type used in workflows
         systemTasks.put(TaskType.JOIN.name(), new Join(conductorProperties));
         systemTasks.put(TaskType.SWITCH.name(), new Switch());
-        systemTasks.put(TaskType.DECISION.name(), new Decision());
         systemTasks.put(TaskType.TERMINATE.name(), new Terminate());
         systemTasks.put(TaskType.SET_VARIABLE.name(),
                 new SetVariable(conductorProperties, objectMapper, inMemoryExecutionDaoFacade));

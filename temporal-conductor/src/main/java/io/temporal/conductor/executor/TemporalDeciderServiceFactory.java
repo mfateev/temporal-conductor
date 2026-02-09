@@ -20,6 +20,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.netflix.conductor.common.metadata.tasks.TaskType;
 import com.netflix.conductor.core.config.ConductorProperties;
 import com.netflix.conductor.core.execution.DeciderService;
+import com.netflix.conductor.core.execution.evaluators.Evaluator;
+import com.netflix.conductor.core.execution.evaluators.ValueParamEvaluator;
 import com.netflix.conductor.core.execution.mapper.DoWhileTaskMapper;
 import com.netflix.conductor.core.execution.mapper.DynamicTaskMapper;
 import com.netflix.conductor.core.execution.mapper.EventTaskMapper;
@@ -30,6 +32,7 @@ import com.netflix.conductor.core.execution.mapper.JoinTaskMapper;
 import com.netflix.conductor.core.execution.mapper.SetVariableTaskMapper;
 import com.netflix.conductor.core.execution.mapper.SimpleTaskMapper;
 import com.netflix.conductor.core.execution.mapper.SubWorkflowTaskMapper;
+import com.netflix.conductor.core.execution.mapper.SwitchTaskMapper;
 import com.netflix.conductor.core.execution.mapper.TaskMapper;
 import com.netflix.conductor.core.execution.mapper.TerminateTaskMapper;
 import com.netflix.conductor.core.execution.mapper.UserDefinedTaskMapper;
@@ -176,6 +179,12 @@ public class TemporalDeciderServiceFactory {
 
         EventTaskMapper eventMapper = new EventTaskMapper(parametersUtils);
         mappers.put(TaskType.EVENT.name(), eventMapper);
+
+        // SWITCH task mapper
+        Map<String, Evaluator> evaluators = new HashMap<>();
+        evaluators.put(ValueParamEvaluator.NAME, new ValueParamEvaluator());
+        SwitchTaskMapper switchMapper = new SwitchTaskMapper(evaluators);
+        mappers.put(TaskType.SWITCH.name(), switchMapper);
 
         return mappers;
     }

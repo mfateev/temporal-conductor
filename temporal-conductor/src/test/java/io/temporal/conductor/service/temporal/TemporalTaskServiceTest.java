@@ -20,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -179,12 +180,10 @@ class TemporalTaskServiceTest {
 
     @Test
     void testGetTaskWithoutMapping() {
-        // When task is not mapped, should return placeholder
-        Task task = taskService.getTask("unmapped-task-id");
-
-        assertNotNull(task);
-        assertEquals("unmapped-task-id", task.getTaskId());
-        assertEquals(Task.Status.SCHEDULED, task.getStatus());
+        // getTask is not implemented - should throw UnsupportedOperationException
+        assertThrows(UnsupportedOperationException.class, () -> {
+            taskService.getTask("unmapped-task-id");
+        });
     }
 
     @Test
@@ -192,12 +191,14 @@ class TemporalTaskServiceTest {
         String taskId = "mapped-task-id";
         String workflowId = "workflow-123";
 
+        // registerTaskMapping should not throw
         taskService.registerTaskMapping(taskId, workflowId);
 
-        // The mapping should be stored (internal state)
-        // We can verify indirectly through getTask behavior
-        Task task = taskService.getTask(taskId);
-        assertNotNull(task);
+        // getTask is not implemented, so we can't verify the mapping directly
+        // The mapping is used internally by updateTask when workflowInstanceId is not provided
+        assertThrows(UnsupportedOperationException.class, () -> {
+            taskService.getTask(taskId);
+        });
     }
 
     @Test
@@ -286,20 +287,19 @@ class TemporalTaskServiceTest {
             Thread.currentThread().interrupt();
         }
 
-        // Get workflow to find task ID
+        // Get workflow to find task ID - tasks can be retrieved via workflow query
         var workflow = workflowService.getWorkflow(workflowId, true);
 
         if (workflow.getTasks() != null && !workflow.getTasks().isEmpty()) {
             String taskId = workflow.getTasks().get(0).getTaskId();
 
-            // Register mapping
+            // Register mapping (still works)
             taskService.registerTaskMapping(taskId, workflowId);
 
-            // Get task via task service
-            Task task = taskService.getTask(taskId);
-
-            assertNotNull(task);
-            assertEquals(taskId, task.getTaskId());
+            // getTask is not implemented - use workflow query to get tasks instead
+            assertThrows(UnsupportedOperationException.class, () -> {
+                taskService.getTask(taskId);
+            });
         }
     }
 

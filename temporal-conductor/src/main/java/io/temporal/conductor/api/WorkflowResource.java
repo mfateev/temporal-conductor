@@ -42,7 +42,7 @@ public class WorkflowResource {
     public ResponseEntity<String> startWorkflow(
             @RequestBody StartWorkflowRequest request) {
         String workflowId = workflowService.startWorkflow(request);
-        return ResponseEntity.ok(workflowId);
+        return ResponseEntity.status(org.springframework.http.HttpStatus.CREATED).body(workflowId);
     }
 
     @PostMapping("/{name}")
@@ -63,7 +63,7 @@ public class WorkflowResource {
         request.setPriority(priority);
         request.setInput(input);
         String workflowId = workflowService.startWorkflow(request);
-        return ResponseEntity.ok(workflowId);
+        return ResponseEntity.status(org.springframework.http.HttpStatus.CREATED).body(workflowId);
     }
 
     @GetMapping("/{workflowId}")

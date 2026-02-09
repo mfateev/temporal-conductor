@@ -125,18 +125,25 @@ public class TaskExecutionContextImpl implements TaskExecutionContext {
             String taskRefName,
             String conductorTaskType,
             Map<String, Object> inputData,
+            String taskQueue,
             BiConsumer<TaskExecutionResult, Throwable> onComplete) {
 
-        logger.debug("Starting async activity {} for task {} (type: {})",
-                activityType, taskRefName, conductorTaskType);
+        logger.debug("Starting async activity {} for task {} (type: {}, taskQueue: {})",
+                activityType, taskRefName, conductorTaskType,
+                taskQueue != null ? taskQueue : "default");
 
-        ActivityOptions options = ActivityOptions.newBuilder()
+        ActivityOptions.Builder optionsBuilder = ActivityOptions.newBuilder()
                 .setStartToCloseTimeout(DEFAULT_START_TO_CLOSE_TIMEOUT)
                 .setRetryOptions(RetryOptions.newBuilder()
                         .setMaximumAttempts(3)
-                        .build())
-                .build();
+                        .build());
 
+        // Set custom task queue if specified
+        if (taskQueue != null && !taskQueue.isEmpty()) {
+            optionsBuilder.setTaskQueue(taskQueue);
+        }
+
+        ActivityOptions options = optionsBuilder.build();
         ActivityStub activityStub = Workflow.newUntypedActivityStub(options);
 
         // Pass: taskRefName, conductorTaskType, inputData

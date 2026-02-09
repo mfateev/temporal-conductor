@@ -24,7 +24,6 @@ import io.temporal.client.WorkflowStub;
 import io.temporal.conductor.dto.SearchResult;
 import io.temporal.conductor.dto.TaskSummary;
 import io.temporal.conductor.service.TaskService;
-import io.temporal.conductor.workflow.model.TaskState;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -67,28 +66,10 @@ public class TemporalTaskService implements TaskService {
 
     @Override
     public Task getTask(String taskId) {
-        logger.debug("Getting task: {}", taskId);
-
-        String workflowId = taskToWorkflowMapping.get(taskId);
-        if (workflowId == null) {
-            logger.warn("Task not found in mapping: {}", taskId);
-            return createPlaceholderTask(taskId);
-        }
-
-        try {
-            WorkflowStub workflowStub = workflowClient.newUntypedWorkflowStub(workflowId);
-            List<TaskState> tasks = workflowStub.query("getTasks", List.class);
-
-            for (TaskState taskState : tasks) {
-                if (taskId.equals(taskState.getTaskId())) {
-                    return convertToTask(taskState, workflowId);
-                }
-            }
-        } catch (Exception e) {
-            logger.warn("Failed to query task from workflow {}: {}", workflowId, e.getMessage());
-        }
-
-        return createPlaceholderTask(taskId);
+        // TODO: This API requires workflowId to function properly.
+        // Refactor to include workflowId parameter or use workflow-specific task queries.
+        throw new UnsupportedOperationException(
+                "getTask(taskId) is not implemented. Use workflow query to get tasks instead.");
     }
 
     @Override
@@ -166,35 +147,5 @@ public class TemporalTaskService implements TaskService {
      */
     public void registerTaskMapping(String taskId, String workflowId) {
         taskToWorkflowMapping.put(taskId, workflowId);
-    }
-
-    private Task convertToTask(TaskState taskState, String workflowId) {
-        Task task = new Task();
-        task.setTaskId(taskState.getTaskId());
-        task.setTaskType(taskState.getTaskType());
-        task.setTaskDefName(taskState.getTaskDefName());
-        task.setReferenceTaskName(taskState.getReferenceTaskName());
-        task.setWorkflowInstanceId(workflowId);
-        task.setStatus(Task.Status.valueOf(taskState.getStatus()));
-        task.setRetryCount(taskState.getRetryCount());
-        task.setScheduledTime(taskState.getScheduledTime());
-        task.setStartTime(taskState.getStartTime());
-        task.setUpdateTime(taskState.getUpdateTime());
-        task.setEndTime(taskState.getEndTime());
-        task.setInputData(taskState.getInputData());
-        task.setOutputData(taskState.getOutputData());
-        task.setWorkerId(taskState.getWorkerId());
-        task.setPollCount(taskState.getPollCount());
-        task.setIteration(taskState.getIteration());
-        task.setReasonForIncompletion(taskState.getReasonForIncompletion());
-        return task;
-    }
-
-    private Task createPlaceholderTask(String taskId) {
-        Task task = new Task();
-        task.setTaskId(taskId);
-        task.setStatus(Task.Status.SCHEDULED);
-        task.setTaskType("UNKNOWN");
-        return task;
     }
 }

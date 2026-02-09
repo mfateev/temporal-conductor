@@ -64,7 +64,7 @@ public interface TaskExecutionContext {
     // ==================== Activity Operations ====================
 
     /**
-     * Execute an activity asynchronously.
+     * Execute an activity asynchronously on the workflow's default task queue.
      * The callback is invoked when the activity completes.
      *
      * @param activityType the activity type name
@@ -74,12 +74,35 @@ public interface TaskExecutionContext {
      * @param inputData the activity input data
      * @param onComplete callback invoked with result or failure
      */
+    default void executeActivityAsync(
+            String activityType,
+            String taskId,
+            String taskRefName,
+            String conductorTaskType,
+            Map<String, Object> inputData,
+            BiConsumer<TaskExecutionResult, Throwable> onComplete) {
+        executeActivityAsync(activityType, taskId, taskRefName, conductorTaskType, inputData, null, onComplete);
+    }
+
+    /**
+     * Execute an activity asynchronously on a specified task queue.
+     * The callback is invoked when the activity completes.
+     *
+     * @param activityType the activity type name
+     * @param taskId the task ID (used for tracking)
+     * @param taskRefName the task reference name
+     * @param conductorTaskType the Conductor task type (e.g., JSON_JQ_TRANSFORM, SIMPLE)
+     * @param inputData the activity input data
+     * @param taskQueue optional task queue override (null uses workflow's default queue)
+     * @param onComplete callback invoked with result or failure
+     */
     void executeActivityAsync(
             String activityType,
             String taskId,
             String taskRefName,
             String conductorTaskType,
             Map<String, Object> inputData,
+            String taskQueue,
             BiConsumer<TaskExecutionResult, Throwable> onComplete);
 
     /**
